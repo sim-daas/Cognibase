@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     ruby-dev \
     build-essential \
     wget \
+    "~nros-humble-rqt*" \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Match Robot Environment Variables EXACTLY
