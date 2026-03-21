@@ -1,0 +1,9 @@
+# ─── CogniBot Core Dependencies ──────────────────────────────────────
+pydantic-ai[google,groq]>=0.1.0
+mcp>=1.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# ─── Optional LLM Providers ─────────────────────────────────────────
+# Ollama is supported out-of-the-box via pydantic-ai's OpenAI-compatible client.
+# No extra install needed — just set COGNIBOT_LLM_PROVIDER=ollama and OLLAMA_BASE_URL.

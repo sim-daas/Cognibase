@@ -1,0 +1,23 @@
+{
+  "transport": { "mode": "rosbridge" },
+  "rosbridge": {
+    "url": "ws://localhost:9090",
+    "reconnect": true,
+    "reconnectInterval": 3000
+  },
+  "robot": {
+    "name": "CogniBot",
+    "namespace": "",
+    "cameraTopic": "/camera/image_raw/compressed"
+  },
+  "safety": {
+    "maxLinearVelocity": 0.5,
+    "maxAngularVelocity": 1.0,
+    "workspaceLimits": {
+      "xMin": -10,
+      "xMax": 10,
+      "yMin": -10,
+      "yMax": 10
+    }
+  }
+}

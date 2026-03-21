@@ -1,0 +1,52 @@
+# ─── CogniBot Orchestrator Container ──────────────────────────────────
+# ROS2 Humble + Python 3.10 + Node.js 20 + AgenticROS MCP Adapter
+# ──────────────────────────────────────────────────────────────────────
+
+FROM osrf/ros:humble-desktop-full
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── 1. System deps + CycloneDDS ──────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-rmw-cyclonedds-cpp \
+    python3-pip \
+    python3-venv \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── 2. Install Node.js 20 (for MCP adapter) ─────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@9.15.4 --activate
+
+# ── 3. Build AgenticROS MCP adapter ─────────────────────────────────
+WORKDIR /app/agenticros
+COPY agenticros/package.json agenticros/pnpm-workspace.yaml agenticros/.npmrc agenticros/tsconfig.base.json agenticros/pnpm-lock.yaml ./
+COPY agenticros/packages/core/package.json packages/core/
+COPY agenticros/packages/agenticros-claude-code/package.json packages/agenticros-claude-code/
+RUN pnpm install --no-frozen-lockfile
+COPY agenticros/packages/core/ packages/core/
+COPY agenticros/packages/agenticros-claude-code/ packages/agenticros-claude-code/
+RUN pnpm --filter @agenticros/core build && pnpm --filter @agenticros/claude-code build
+
+# ── 4. Python dependencies ───────────────────────────────────────────
+WORKDIR /app
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
+# ── 5. Application code ──────────────────────────────────────────────
+# cognibot/, skills/, and config/ are mounted as volumes in docker-compose.yml
+# for live development. No COPY needed — changes take effect without rebuild.
+# For production/standalone deployment, uncomment these:
+# COPY cognibot/ cognibot/
+# COPY skills/ skills/
+# COPY config/ config/
+
+# ── 6. ROS2 environment ──────────────────────────────────────────────
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+
+# ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/humble/setup.bash && python3 -m cognibot.main"]

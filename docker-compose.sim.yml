@@ -1,0 +1,56 @@
+services:
+  # ─── CogniBot Orchestrator (ROS2 Humble) ───────────────────────────
+  # PydanticAI agent + MCP adapter (Node.js subprocess)
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    image: cognibot/orchestrator:humble
+    container_name: cognibot_orchestrator
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=184
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
+      - COGNIBOT_CONFIG_PATH=/app/config/cognibot.env
+      - AGENTICROS_CONFIG_PATH=/app/config/agenticros.json
+    volumes:
+      - ./cognibot:/app/cognibot
+      - ./skills:/app/skills
+      - ./config:/app/config
+    depends_on:
+      simulation:
+        condition: service_started
+    stdin_open: true
+    tty: true
+
+  # ─── TurtleBot3 Simulation (ROS2 Jazzy) ────────────────────────────
+  # Gazebo (gz-sim), Nav2, rosbridge_server on :9090
+  simulation:
+    build:
+      context: .
+      dockerfile: Dockerfile.remote
+    image: agenticros/ros2:latest
+    container_name: cognibot_simulation
+    network_mode: host
+    ipc: host
+    pid: host
+    stdin_open: true
+    tty: true
+    environment:
+      - ROS_DOMAIN_ID=184
+      - TURTLEBOT3_MODEL=burger
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=${XAUTHORITY:-/home/ubuntu/.Xauthority}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - .:/root/turtlebot3_ws/src/
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-/home/ubuntu/.Xauthority}:${XAUTHORITY:-/home/ubuntu/.Xauthority}:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,30 @@
+# Environment / Explicitly Ignored
+turtlebot3_simulations/
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js (for agenticros/)
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ROS2 Workspaces
+build/
+install/
+log/
+.colcon/
+
+# OS / IDE
+.DS_Store
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
