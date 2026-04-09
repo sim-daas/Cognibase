@@ -238,7 +238,7 @@ VerticalScroll > .vertical-scrollbar {
                 user_input,
                 deps=self.deps,
                 message_history=self.history if self.history else None,
-                model_settings={"extra_body": {"options": {"think": "high"}, "think": "high"}},
+                model_settings={"extra_body": {"think": "high"}},
             ) as result:
                 
                 # PydanticAI models sometimes strip out <think> tags natively, or chunk them weirdly.

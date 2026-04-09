@@ -54,6 +54,11 @@ class CogniBotConfig:
         env: dict[str, str] = {}
         if self.agenticros_config_path.exists():
             env["AGENTICROS_CONFIG_PATH"] = str(self.agenticros_config_path)
+        
+        ollama_base = os.getenv("OLLAMA_BASE_URL")
+        if ollama_base:
+            env["OLLAMA_BASE_URL"] = ollama_base
+            
         return env
 
 

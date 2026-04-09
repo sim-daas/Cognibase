@@ -42,6 +42,38 @@ export const TOOLS: McpTool[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "ros2_list_services",
+    description:
+      "List all available ROS2 services and their types. Use this to discover synchronous request/response interfaces.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ros2_list_actions",
+    description:
+      "List all available ROS2 action servers and their types. Use to find long-running tasks like navigation goals.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ros2_list_nodes",
+    description:
+      "List all active ROS2 nodes in the system map. Gives an overview of running subsystems.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ros2_vla_query",
+    description:
+      "Query a Vision-Language-Action (VLA) model using the current robot camera frame. Uses qwen3-vl:latest to answer questions about the robot's visual environment based on a text prompt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: { type: "string", description: "Camera image topic (default: /camera/image_raw/compressed)" },
+        prompt: { type: "string", description: "The question or instruction to pass to the VLA model (e.g. 'What do you see?', 'Is the path clear?')" },
+        timeout: { type: "number", description: "Timeout in milliseconds for the entire operation (default: 30000)" },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
     name: "ros2_publish",
     description:
       "Publish a message to a ROS2 topic. Use this to send commands to the robot (e.g., velocity commands to /cmd_vel, navigation goals).",
@@ -185,6 +217,132 @@ export async function handleToolCall(
         truncated: topics.length > MAX,
       });
       return { content: [{ type: "text", text }] };
+    }
+
+    case "ros2_list_services": {
+      const services = await transport.listServices();
+      const MAX = 50;
+      const truncated = services.length > MAX ? services.slice(0, MAX) : services;
+      const text = JSON.stringify({
+        success: true,
+        services: truncated,
+        total: services.length,
+        truncated: services.length > MAX,
+      });
+      return { content: [{ type: "text", text }] };
+    }
+
+    case "ros2_list_actions": {
+      const actions = await transport.listActions();
+      const MAX = 50;
+      const truncated = actions.length > MAX ? actions.slice(0, MAX) : actions;
+      const text = JSON.stringify({
+        success: true,
+        actions: truncated,
+        total: actions.length,
+        truncated: actions.length > MAX,
+      });
+      return { content: [{ type: "text", text }] };
+    }
+
+    case "ros2_list_nodes": {
+      const response = await transport.callService({
+        service: "/rosapi/nodes",
+        type: "rosapi/srv/Nodes",
+      });
+      const nodes = Array.isArray(response.values?.["nodes"]) ? response.values!["nodes"] as string[] : [];
+      const MAX = 50;
+      const truncated = nodes.length > MAX ? nodes.slice(0, MAX) : nodes;
+      const text = JSON.stringify({
+        success: response.result,
+        nodes: truncated,
+        total: nodes.length,
+        truncated: nodes.length > MAX,
+      });
+      return { content: [{ type: "text", text }] };
+    }
+
+    case "ros2_vla_query": {
+      const defaultTopic = "/camera/image_raw/compressed";
+      const rawTopic = (args["topic"] as string | undefined) ?? defaultTopic;
+      const topic = toNamespacedTopic(config, rawTopic);
+      const prompt = args["prompt"] as string;
+      const timeout = (args["timeout"] as number | undefined) ?? 30000;
+      const messageType: "CompressedImage" | "Image" = topic.includes("compressed") ? "CompressedImage" : "Image";
+      const type = messageType === "Image" ? IMAGE_TYPE : COMPRESSED_IMAGE_TYPE;
+
+      // 1. Capture image
+      const imageResult = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const subscription = transport.subscribe(
+          { topic, type },
+          (msg: Record<string, unknown>) => {
+            clearTimeout(timer);
+            subscription.unsubscribe();
+            if (messageType === "Image") {
+              const data = msg["data"];
+              resolve({ success: true, data: imageDataToBase64(data) });
+            } else {
+              const raw = msg["data"];
+              resolve({ success: true, data: typeof raw === "string" ? raw : imageDataToBase64(raw) });
+            }
+          },
+        );
+        const timer = setTimeout(() => {
+          subscription.unsubscribe();
+          reject(new Error(`Timeout waiting for camera frame on ${topic}`));
+        }, 10000);
+      });
+
+      const base64Image = imageResult.data as string;
+      if (!base64Image) {
+        return { content: [{ type: "text", text: "Failed to capture image for VLA query." }], isError: true };
+      }
+
+      // 2. Query Ollama
+      let ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+      if (ollamaUrl.endsWith("/v1")) {
+         ollamaUrl = ollamaUrl.slice(0, -3);
+      }
+      
+      try {
+        const controller = new AbortController();
+        const fetchTimer = setTimeout(() => controller.abort(), timeout - 10000); 
+        
+        const response = await fetch(`${ollamaUrl}/api/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "qwen3-vl",
+            stream: false,
+            messages: [
+              {
+                role: "user",
+                content: prompt,
+                images: [base64Image]
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(fetchTimer);
+
+        if (!response.ok) {
+           throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json() as Record<string, unknown>;
+        let output = "No response generated";
+        if (data.message && typeof data.message === "object") {
+           const msg = data.message as Record<string, unknown>;
+           output = String(msg.content || output);
+        }
+        return { content: [{ type: "text", text: `[VLA Output via ${topic}]:\n${output}` }] };
+      } catch (err: any) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const cause = err.cause ? ` (Cause: ${err.cause.message || err.cause})` : "";
+        return { content: [{ type: "text", text: `VLA reasoning failed: ${msg}${cause} [Attempted: ${ollamaUrl}/api/chat]` }], isError: true };
+      }
     }
 
     case "ros2_publish": {
