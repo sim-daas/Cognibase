@@ -230,9 +230,6 @@ VerticalScroll > .vertical-scrollbar {
     async def run_agent(self, user_input: str) -> None:
         chat_area = self.query_one("#chat-area")
         
-        # Thinking line (placeholder)
-        thinking_widget = self.add_message("bot", "", is_thinking=True)
-        
         response_text = ""
         response_widget = None
 
@@ -283,8 +280,6 @@ VerticalScroll > .vertical-scrollbar {
                         if "</think>" in buffer:
                             parts = buffer.split("</think>", 1)
                             thinking_text += parts[0]
-                            thinking_widget.content = thinking_text
-                            thinking_widget.refresh()
                             
                             in_think = False
                             buffer = parts[1] # Keep the rest as regular response text
@@ -301,16 +296,12 @@ VerticalScroll > .vertical-scrollbar {
                                 pass # Wait for next chunk
                             else:
                                 thinking_text += buffer
-                                thinking_widget.content = thinking_text
-                                thinking_widget.refresh()
                                 buffer = ""
 
                 # Flush any remaining buffer
                 if buffer:
                     if in_think:
                         thinking_text += buffer
-                        thinking_widget.content = thinking_text
-                        thinking_widget.refresh()
                     else:
                         if not response_widget:
                             response_widget = self.add_message("bot", "")

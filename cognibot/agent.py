@@ -109,11 +109,12 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
     if "required" in input_schema:
         parameters_schema["required"] = input_schema["required"]
 
-    return Tool(
+    return Tool.from_schema(
         mcp_tool_proxy,
-        takes_ctx=True,
         name=tool_name,
         description=description,
+        json_schema=parameters_schema,
+        takes_ctx=True,
     )
 
 

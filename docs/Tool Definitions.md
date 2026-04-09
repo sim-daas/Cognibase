@@ -35,3 +35,16 @@ These tools are exposed to the LLM via the Node.js MCP bridge. They abstract com
 ## **Memory & Context**
 
 19. **query\_semantic\_memory**: Retrieve historical context, prior states, or mapped locations from the localized database.
+
+## **Adding New Tools (Standard Method)**
+
+To expand the capabilities of the agent, you must expose new tools through the AgenticROS MCP integration. The standard procedure entails three explicit steps to ensure the LLM understands and utilizes the new tools correctly:
+
+1. **Define the Interface**: 
+   Open `agenticros/packages/agenticros-claude-code/src/tools.ts` and add your new tool interface to the `TOOLS` array. Ensure you provide a clear `name`, a descriptive `description` explaining precisely when to use the tool, and rigorously specify the `inputSchema` detailing the expected parameters matching the JSON Schema format.
+
+2. **Implement Business Logic**: 
+   Within the same `tools.ts` file, locate the `handleToolCall` function switch-case statement. Add a case for your new `name` to execute the corresponding ROS 2 functionality natively via the core `transport` interface. Make sure to return an appropriate JSON or text response.
+
+3. **Rebuild & Refresh**: 
+   Compile the AgenticROS package by navigating dynamically to `agenticros` and building (e.g. `pnpm install` and `pnpm run build` or the respective build tool). Then, CogniBot will auto-discover the schema properly formatted for `pydantic-ai` upon next launch.
