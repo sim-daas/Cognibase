@@ -11,8 +11,8 @@
     "cameraTopic": "/camera/image_raw/compressed"
   },
   "safety": {
-    "maxLinearVelocity": 0.5,
-    "maxAngularVelocity": 1.0,
+    "maxLinearVelocity": 0.22,
+    "maxAngularVelocity": 2.84,
     "workspaceLimits": {
       "xMin": -10,
       "xMax": 10,
