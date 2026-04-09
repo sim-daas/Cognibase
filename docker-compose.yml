@@ -58,5 +58,10 @@ services:
       - ROS_DOMAIN_ID=184
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - CYCLONEDDS_URI=file:///root/turtlebot3_ws/src/cyclonedds.xml
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=${XAUTHORITY:-~/.Xauthority}
+      - QT_X11_NO_MITSHM=1
     volumes:
-      - ./cyclonedds.xml:/root/turtlebot3_ws/src/cyclonedds.xml:ro
+      - .:/root/turtlebot3_ws/src/
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-~/.Xauthority}:${XAUTHORITY:-~/.Xauthority}:rw

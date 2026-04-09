@@ -27,15 +27,38 @@ from cognibot.config import CogniBotConfig, load_config
 from cognibot.mcp_client import MCPBridge
 from cognibot.agent import AgentDeps, create_agent
 from cognibot.skill_loader import compile_system_prompt, scan_skills
+from cognibot.tui import CogniBotTUI
+
 
 # ── Logging ──────────────────────────────────────────────────────────
+# Suppress noisy library logs (httpx, openai, etc.)
+logging.basicConfig(level=logging.WARNING)
+for logger_name in ["httpx", "openai", "httpcore", "mcp"]:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger("cognibot")
+logger.setLevel(logging.INFO)
+
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.markdown import Markdown
+from rich.text import Text
+from rich.align import Align
+from rich.theme import Theme
+
+custom_theme = Theme({
+    "info": "dim cyan",
+    "warning": "magenta",
+    "danger": "bold red",
+    "user": "bold green",
+    "bot": "bold blue",
+    "think": "dim italic grey50",
+    "tool": "bold yellow",
+})
+
+console = Console(theme=custom_theme)
+
 
 # ── Message History Config ────────────────────────────────────────────
 # Keep this many user/assistant turn-pairs in the rolling history.
@@ -103,34 +126,21 @@ def _trim_history(history: list[ModelMessage]) -> list[ModelMessage]:
 
 # ── Interactive REPL ─────────────────────────────────────────────────
 
-async def run_interactive(config: CogniBotConfig) -> None:
-    """Main interactive loop: connect MCP, create agent, REPL."""
+async def run_interactive(config: CogniBotConfig, theme: str = None) -> None:
+    """Main entry point for interactive mode: connect MCP and launch TUI."""
     bridge = MCPBridge(config)
 
-    print("\n╔══════════════════════════════════════╗")
-    print("║       CogniBot — Agentic Robot       ║")
-    print("╚══════════════════════════════════════╝\n")
-
+    console.print("\n[bold cyan]Starting CogniBot TUI...[/bold cyan]")
+    
     # ── Connect MCP adapter ──────────────────────────────────────────
-    print("Connecting to MCP adapter...")
     try:
         await bridge.connect()
     except Exception as e:
         logger.error("Failed to connect MCP adapter: %s", e)
-        print(f"\n✗ MCP adapter connection failed: {e}")
-        print("  Make sure the MCP adapter is built:")
-        print(f"    cd {config.mcp_server_script.parent.parent.parent}")
-        print("    pnpm install && pnpm build")
-        print("\n  And rosbridge_server is running on ws://localhost:9090")
+        console.print(f"\n[danger]✗ MCP adapter connection failed:[/danger] {e}")
         return
 
-    tools = bridge.get_tools()
-    print(f"✓ MCP adapter connected — {len(tools)} tools available")
-    for t in tools:
-        print(f"  • {t.name}")
-
     # ── Create agent ─────────────────────────────────────────────────
-    print("\nInitializing agent...")
     try:
         agent = create_agent(config, bridge)
     except Exception as e:
@@ -138,56 +148,19 @@ async def run_interactive(config: CogniBotConfig) -> None:
         await bridge.disconnect()
         return
 
-    deps = AgentDeps(config=config, mcp_bridge=bridge)
-    print(f"✓ Agent ready (model: {config.llm_model})")
-    print(f"  Session memory: last {MAX_HISTORY_TURNS} turns retained")
-    print("\nType your commands (Ctrl+C or 'exit' to quit):\n")
-
-    # ── Message history for this session ─────────────────────────────
-    message_history: list[ModelMessage] = []
-
-    # ── REPL ─────────────────────────────────────────────────────────
+    deps = AgentDeps(config=config, mcp_bridge=bridge, console=console)
+    
+    # ── Launch TUI ───────────────────────────────────────────────────
+    app = CogniBotTUI(agent=agent, deps=deps)
+    if theme:
+        app.theme = theme
     try:
-        while True:
-            try:
-                user_input = input("You > ").strip()
-            except EOFError:
-                break
-
-            if not user_input:
-                continue
-            if user_input.lower() in ("exit", "quit", "q"):
-                break
-            if user_input.lower() in ("history", "/history"):
-                print(f"  [History: {len(message_history)} messages in current session]")
-                continue
-            if user_input.lower() in ("clear", "/clear"):
-                message_history = []
-                print("  [History cleared]")
-                continue
-
-            try:
-                result = await agent.run(
-                    user_input,
-                    deps=deps,
-                    message_history=message_history if message_history else None,
-                )
-                # Append new messages to history and trim to limit
-                message_history.extend(result.new_messages())
-                message_history = _trim_history(message_history)
-
-                print(f"\nCogniBot > {result.output}\n")
-                logger.debug("History size: %d messages", len(message_history))
-
-            except Exception as e:
-                logger.error("Agent error: %s", e, exc_info=True)
-                print(f"\n✗ Error: {e}\n")
-
-    except KeyboardInterrupt:
-        print("\n\nShutting down...")
+        await app.run_async()
+    except Exception as e:
+        logger.error("TUI Error: %s", e)
     finally:
         await bridge.disconnect()
-        print("Goodbye.")
+
 
 
 # ── Entry point ──────────────────────────────────────────────────────
@@ -207,6 +180,12 @@ def main() -> None:
         default=None,
         help="Path to environment config file (default: auto-detect)",
     )
+    parser.add_argument(
+        "--theme",
+        type=str,
+        default=None,
+        help="Textual theme to use for the TUI (e.g., textual-dark, dracula, etc.)",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -215,7 +194,7 @@ def main() -> None:
         dry_run(config)
         sys.exit(0)
 
-    asyncio.run(run_interactive(config))
+    asyncio.run(run_interactive(config, args.theme))
 
 
 if __name__ == "__main__":

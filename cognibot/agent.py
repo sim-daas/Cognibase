@@ -20,15 +20,32 @@ from cognibot.skill_loader import compile_system_prompt, load_skill_content
 
 logger = logging.getLogger(__name__)
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.align import Align
+
+# Create a default console for tool logging
+# In a real app, we might pass this in from main.py via Deps
+_console = Console(theme=None) # Will use default color if not set
+
+
 
 # ── Dependency context injected into every tool call ─────────────────
 
 class AgentDeps:
     """Runtime dependencies available to all agent tools."""
 
-    def __init__(self, config: CogniBotConfig, mcp_bridge: MCPBridge) -> None:
+    def __init__(self, config: CogniBotConfig, mcp_bridge: MCPBridge, console: Console | None = None) -> None:
         self.config = config
         self.mcp_bridge = mcp_bridge
+        self.console = console or _console
+        
+        # TUI Hooks (to be injected by the TUI app if running)
+        self.tui_on_tool_start = None
+        self.tui_on_tool_end = None
+
+
 
 
 # ── MCP tool wrapper factory ─────────────────────────────────────────
@@ -41,8 +58,36 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
     """
 
     async def mcp_tool_proxy(ctx: RunContext[AgentDeps], **kwargs: Any) -> str:
+        # Display the tool call to the right (CLI)
+        arg_json = json.dumps(kwargs, indent=2)
+        panel = Panel(
+            Syntax(arg_json, "json", theme="monokai", background_color="default"),
+            title=f"🛠️  [bold yellow]Tool Call: {tool_name}[/bold yellow]",
+            border_style="yellow",
+            expand=False,
+        )
+        ctx.deps.console.print(Align.right(panel))
+
+        # TUI Notification
+        tui_widget = None
+        if ctx.deps.tui_on_tool_start:
+            tui_widget = ctx.deps.tui_on_tool_start(tool_name, kwargs)
+
         result = await ctx.deps.mcp_bridge.call_tool(tool_name, kwargs)
+        
+        is_error = result.get("isError", False)
+        if is_error:
+            ctx.deps.console.print(Align.right(f"[bold red]❌ Tool Error: {tool_name}[/bold red]"))
+        else:
+            ctx.deps.console.print(Align.right(f"[bold green]✅ Tool Success: {tool_name}[/bold green]"))
+
+        # TUI Notification
+        if ctx.deps.tui_on_tool_end and tui_widget:
+            ctx.deps.tui_on_tool_end(tui_widget, str(result.get("content", ""))[:200], not is_error)
+
         # Stringify content blocks for the LLM
+
+
         parts: list[str] = []
         for block in result.get("content", []):
             if block.get("type") == "text":
@@ -118,12 +163,15 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
         Available Skills section of your system prompt. The full text
         will be returned so you can follow the skill's instructions.
         """
+        ctx.deps.console.print(Align.right(f"🛠️  [bold cyan]Loading Skill: {skill_id}[/bold cyan]"))
         try:
             content = load_skill_content(skill_id, ctx.deps.config.skills_dir)
-            logger.info("Loaded skill context: %s (%d chars)", skill_id, len(content))
+            ctx.deps.console.print(Align.right(f"[bold green]✅ Skill Loaded: {skill_id}[/bold green]"))
             return content
         except FileNotFoundError as e:
+            ctx.deps.console.print(Align.right(f"[bold red]❌ Skill Load Failed: {skill_id}[/bold red]"))
             return str(e)
+
 
     logger.info(
         "Agent created — %d MCP tools + 1 native tool (load_skill_context)",
