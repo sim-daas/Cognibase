@@ -161,7 +161,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        topic: { type: "string", description: "Camera image topic (default from config or /camera/camera/color/image_raw/compressed)" },
+        topic: { type: "string", description: "Camera image topic (default from config or /camera/image_raw/compressed)" },
         message_type: { type: "string", description: "'CompressedImage' or 'Image' (default: CompressedImage)" },
         timeout: { type: "number", description: "Timeout in milliseconds (default: 10000)" },
       },
@@ -313,6 +313,9 @@ export async function handleToolCall(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "qwen3-vl",
+            options: {
+              num_ctx: 4096
+            },
             stream: false,
             messages: [
               {

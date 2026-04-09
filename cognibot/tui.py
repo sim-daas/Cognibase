@@ -105,6 +105,12 @@ class CogniBotTUI(App):
     height: 1fr;
     background: #161618;
     padding: 1 2;
+    layout: vertical;
+}
+
+#tool-calls-list {
+    height: 1fr;
+    margin-top: 1;
 }
 
 #chat-area {
@@ -188,11 +194,11 @@ VerticalScroll > .vertical-scrollbar {
                     yield Static("COGNIBOT", id="welcome-banner")
                 with Vertical(id="input-container"):
                     yield Input(placeholder="Type your command here...", id="chat-input")
-            with VerticalScroll(id="sidebar"):
+            with Vertical(id="sidebar"):
                 yield Static("ACTIVE CONTEXT", classes="sidebar-title")
                 yield Static(f"Model: [dim]{self.deps.config.llm_model}[/dim]")
                 yield Static("\nMODIFIED TOOLS", classes="sidebar-title")
-                yield Vertical(id="tool-calls-list")
+                yield VerticalScroll(id="tool-calls-list")
 
 
     def on_mount(self) -> None:
@@ -320,6 +326,7 @@ VerticalScroll > .vertical-scrollbar {
         tool_list = self.query_one("#tool-calls-list")
         widget = ToolCallWidget(name, args)
         tool_list.mount(widget)
+        widget.scroll_visible()
         return widget
 
     def on_tool_end(self, widget: ToolCallWidget, result: str, success: bool):

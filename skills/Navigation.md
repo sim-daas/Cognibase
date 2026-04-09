@@ -1,6 +1,6 @@
-# **Skill: Navigation (Nav2 / SLAM)**
+## **SKILL_ID: navigation DESCRIPTION: Procedures for Nav2 coordinates, pose checking, and spatial movement.**
 
-This skill provides instructions on how to interface with the robot's ROS 2 Navigation 2 (Nav2) stack and odometry topics. When a user asks you to navigate to a location, move to a coordinate, or report the robot's current position, you must follow these procedures.
+# **Skill: Navigation (Nav2 / SLAM)**
 
 ## **1. Checking Current Position (Localization)**
 

@@ -1,19 +1,17 @@
-## **SKILL\_ID: obstacle\_resolution DESCRIPTION: Decision matrix for handling blocked paths, including when to detour, wait, or physically interact with an obstacle.**
+## **SKILL_ID: obstacle_resolution DESCRIPTION: Decision matrix for handling blocked paths using visual reasoning.**
 
 # **Skill: Obstacle Resolution Matrix**
 
-When check\_action\_status returns ABORTED due to a blocked path, do not blindly loop the navigation command. Evaluate the obstacle and resolve it.
+When a navigation action (to `/navigate_to_pose`) fails or a path is blocked, do not blindly loop. Evaluate the obstacle and resolve it.
 
-## **1\. Classification**
+## **1. Classification & Chaining**
 
-Use capture\_camera\_frame and query\_vla\_pipeline. Ask the VLA to classify the blocking entity into one of three categories:
+You must characterize the obstacle before deciding. Chain these tools:
+1. **`ros2_camera_snapshot`**: Provide visual context to the user.
+2. **`ros2_vla_query`**: Prompt: "What is blocking the path? Classify as: [A: Human/Moving, B: Small/Pushable, C: Static/Solid]".
 
-* **A: Dynamic Actor** (Human, Forklift, Pet)  
-* **B: Lightweight Debris** (Empty cardboard box, loose paper)  
-* **C: Hard/Impassable Object** (Pallet, closed door, heavy equipment)
+## **2. Resolution Execution**
 
-## **2\. Resolution Execution**
-
-* **If A (Dynamic):** Humans and vehicles move. Use ask\_human\_clarification (TTS) to say "Excuse me, please clear the path." Wait 10 seconds. Re-evaluate.  
-* **If B (Lightweight):** If the item poses zero risk to the drivetrain, publish a localized velocity override to push through it. *(Note: rely on deterministic ROS nodes for pushing, do not attempt to micro-manage /cmd\_vel via the LLM).*  
-* **If C (Hard/Impassable):** Do not interact. Query query\_semantic\_memory for an alternate route. If no alternate route exists, use send\_notification to request human intervention.
+* **If A (Moving Actor):** Use `ros2_publish` to a TTS topic (if available) or simply wait and retry `ros2_action_goal` after 10 seconds.
+* **If B (Pushable):** If safe, you may use `ros2_cmd_vel_duration` to gently nudge or clear the path. **Safety First:** Do not push if it looks fragile.
+* **If C (Static):** Do not interact. Request a New Path or notify the human operator.

@@ -1,28 +1,25 @@
-## **SKILL\_ID: emergency\_escalation DESCRIPTION: Mandatory protocols for handling physical anomalies, detected falls, unauthorized access, or critical hardware failures.**
+## **SKILL_ID: emergency_escalation DESCRIPTION: Protocols for handling physical anomalies or critical failures.**
 
 # **Skill: Emergency Escalation & Triage Protocol**
 
-If a background interrupt fires (e.g., Fall Detected, Unrecognized Person in Server Room), you must immediately drop current tasks and execute this triage protocol.
+If an anomaly is detected (e.g., via `ros2_subscribe_once` on a diagnostic topic), you must immediately triage.
 
-## **1\. Visual Verification (Grounding)**
+## **1. Visual Verification & Chaining**
 
-Do not trigger alarms based purely on a single sensor blip. You must achieve visual verification.
+Do not trigger alarms on sensor noise. You MUST achieve visual verification.
+* **Orient:** Use `ros2_publish` to `/cmd_vel` or `ros2_cmd_vel_duration` to turn towards the anomaly.
+* **Chain Vision:** 
+    1. Call `ros2_camera_snapshot` for the human timeline.
+    2. IMMEDIATELY call `ros2_vla_query` with a severe prompt (e.g., "Is there a person on the floor? Are they injured?").
 
-* Orient the camera to the anomaly coordinates.  
-* Use capture\_camera\_frame and query\_vla\_pipeline to assess severity.  
-  * *Prompt example:* "Is the person on the floor injured or moving?" or "Is the person wearing a blue contractor badge?"
+## **2. Immediate Kinetic Mitigation**
 
-## **2\. Immediate Kinetic Mitigation**
+If verified:
+* **Halt:** Issue a zero-velocity command using `ros2_publish` to `/cmd_vel`.
+* **Safe State:** Stop all active navigation goals via the relevant action client if necessary.
 
-If the threat is verified:
+## **3. Communication**
 
-* **Hazard/Fire/Spill:** Issue a zero-velocity command to the base. Do not drive through the hazard.  
-* **Security Breach:** Use control\_appliance to secure local physical perimeters (lock doors).
-
-## **3\. Communication Escalation**
-
-Do not wait for the human to check the logs.
-
-1. Use trigger\_alarm to activate local physical sirens if there is immediate life safety risk.  
-2. Use send\_notification to dispatch the verified anomaly text AND the supporting camera frame to the administrator.  
-3. Do not resume normal operations until the operator issues a manual "all clear" override.
+1. Report the VLA reasoning result to the user immediately.
+2. Provide the snapshot timestamp so the user can review the frame.
+3. Keep the robot stationary until "all clear".
