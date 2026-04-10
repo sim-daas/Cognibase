@@ -194,6 +194,19 @@ async with stdio_client(server_params) as (read, write):
 
 ---
 
+## **7. Planned Extensions: Continuous Learning & Memory**
+
+CogniBot is moving toward a self-optimizing architecture where real-world performance is fed back into the skill definition layer.
+
+- **Skill-Review Engine**: Post-mission analysis of tool calls and outcomes to identify latency spikes or logic failures.
+- **Semantic Memory Layer**: A persistent DB storing spatial knowledge (preferred routes), behavioral history (user preferences), and environmental context (busy times).
+- **Adaptive Navigation**: Using semantic memory to "bias" Nav2 via route injection (`set_plan`), dynamic costmap markers, and Behavior-Tree selection.
+
+**Detailed Blueprint:** [Project Additions & Continuous Improvement](file:///home/ubuntu/githubrepos/Cognibase/docs/Project%20Additions%20%26%20Continuous%20Improvement.md)
+
+---
+
+
 ## **4. Execution Pipeline: Async Navigation (Nav2)**
 
 ```

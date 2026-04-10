@@ -73,3 +73,21 @@
 4. **Complex Agentic Tasks:** Test end-to-end tool chaining workflows requiring vision + navigation + reasoning (e.g., "Find the red cup, track it, and tell me if it falls off the table").
 
 **Exit Criteria:** A fully autonomous, internet-independent robotic system capable of real-time semantic reasoning, high-frequency visual processing, and complex multi-tool agentic workflows.
+
+---
+
+## **Phase 4: Continuous Learning & Semantic Navigation**
+
+**Objective:** Transition from a deterministic tool-user to an adaptive agent that optimizes its skills through real-world experience and leverages semantic spatial memory for "smarter" navigation.
+
+**For full details, see: [Project Additions & Continuous Improvement](file:///home/ubuntu/githubrepos/Cognibase/docs/Project%20Additions%20%26%20Continuous%20Improvement.md)**
+
+**Milestones:**
+
+1. **Dynamic Tool Registry:** Implement automatic discovery of skills via the `SKILL_ID` and `DESCRIPTION` headers.
+2. **Post-Mission Review Engine:** Build the logic to parse mission logs, verify outcomes, and generate structured JSON reviews for skill performance.
+3. **Semantic Memory Integration:** Deploy a localized database for waypoints, alternate routes, and behavioral history accessed via `query_semantic_memory`.
+4. **Memory-Biased Navigation:** Augment Nav2 with pre-planned route injection and dynamic costmap modification based on semantic context (e.g., typical crowd times).
+5. **Auto-Update Workflow:** Implement the `/skills/update` API for zero-downtime injection of improved skill heuristics.
+
+**Exit Criteria:** The agent autonomously identifies skill failures, suggests param-tuning via review logs, and biases its navigation paths based on historical behavioral context without manual script changes.
