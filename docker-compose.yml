@@ -33,6 +33,7 @@ services:
       - ./cognibot:/app/cognibot        # live-reload Python source
       - ./skills:/app/skills            # live-reload skills/SOUL.md
       - ./config:/app/config            # live-reload agenticros.json, cognibot.env
+      - cognibot_memory:/app/memory_db  # persistent LanceDB vector store
     depends_on:
       rosbridge:
         condition: service_started
@@ -65,3 +66,8 @@ services:
       - .:/root/turtlebot3_ws/src/
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-~/.Xauthority}:${XAUTHORITY:-~/.Xauthority}:rw
+
+# ─── Named Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  cognibot_memory:
+    driver: local   # persists LanceDB tables across orchestrator container restarts

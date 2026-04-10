@@ -26,6 +26,7 @@ from pydantic_ai.messages import ModelMessage
 from cognibot.config import CogniBotConfig, load_config
 from cognibot.mcp_client import MCPBridge
 from cognibot.agent import AgentDeps, create_agent
+from cognibot.memory import SemanticMemoryStore
 from cognibot.skill_loader import compile_system_prompt, scan_skills
 from cognibot.tui import CogniBotTUI
 
@@ -131,8 +132,27 @@ async def run_interactive(config: CogniBotConfig, theme: str = None) -> None:
     bridge = MCPBridge(config)
 
     console.print("\n[bold cyan]Starting CogniBot TUI...[/bold cyan]")
-    
-    # ── Connect MCP adapter ──────────────────────────────────────────
+
+    # ── Initialize Semantic Memory ────────────────────────────────────
+    memory = SemanticMemoryStore(
+        db_path=config.memory_db_path,
+        ollama_url=config.memory_embedding_url,
+    )
+    try:
+        await memory.initialize()
+        stats = await memory.stats()
+        total = sum(stats.values())
+        console.print(
+            f"[bold green]✅ Semantic Memory ready[/bold green] "
+            f"— {total} memories across {len(stats)} domains "
+            f"(db: {config.memory_db_path}, embed: {config.memory_embedding_url})"
+        )
+    except Exception as e:
+        logger.warning("Semantic memory init failed: %s", e)
+        console.print(f"[warning]⚠ Semantic memory unavailable:[/warning] {e}")
+        memory = None  # type: ignore[assignment]
+
+    # ── Connect MCP adapter ───────────────────────────────────────────
     try:
         await bridge.connect()
     except Exception as e:
@@ -140,7 +160,7 @@ async def run_interactive(config: CogniBotConfig, theme: str = None) -> None:
         console.print(f"\n[danger]✗ MCP adapter connection failed:[/danger] {e}")
         return
 
-    # ── Create agent ─────────────────────────────────────────────────
+    # ── Create agent ──────────────────────────────────────────────────
     try:
         agent = create_agent(config, bridge)
     except Exception as e:
@@ -148,9 +168,12 @@ async def run_interactive(config: CogniBotConfig, theme: str = None) -> None:
         await bridge.disconnect()
         return
 
-    deps = AgentDeps(config=config, mcp_bridge=bridge, console=console)
-    
-    # ── Launch TUI ───────────────────────────────────────────────────
+    deps = AgentDeps(config=config, mcp_bridge=bridge, memory=memory, console=console)
+
+    from cognibot.review import start_review_api
+    review_task = asyncio.create_task(start_review_api(config.skills_dir))
+
+    # ── Launch TUI ────────────────────────────────────────────────────
     app = CogniBotTUI(agent=agent, deps=deps)
     if theme:
         app.theme = theme

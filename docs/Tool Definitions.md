@@ -34,7 +34,9 @@ These tools are exposed to the LLM via the Node.js MCP bridge. They abstract com
 
 ## **Memory & Context**
 
-19. **query\_semantic\_memory**: Retrieve historical context, prior states, or mapped locations from the localized database.
+19. **query\_semantic\_memory**: Retrieve historical context, prior states, or mapped locations from the localized LanceDB database.
+20. **store\_memory**: Store a new entry in the robot's persistent semantic memory (spatial, behavioral, env_context, policy) for future reference.
+21. **plan\_memory\_route**: Query spatial and behavioral memory for a preferred route to a specific named destination before initiating Nav2.
 
 ## **Adding New Tools (Standard Method)**
 

@@ -41,6 +41,10 @@ class CogniBotConfig:
     mcp_server_script: Path = _DEFAULT_MCP_SCRIPT
     agenticros_config_path: Path = Path("/app/config/agenticros.json")
 
+    # ── Semantic Memory ───────────────────────────────────────────────
+    memory_db_path: Path = Path("./memory_db")
+    memory_embedding_url: str = "http://localhost:11434"  # Ollama base URL
+
     # ── MCP subprocess ───────────────────────────────────────────────
     mcp_server_command: str = "node"
 
@@ -93,4 +97,6 @@ def load_config(env_file: str | Path | None = None) -> CogniBotConfig:
         soul_path=_path("COGNIBOT_SOUL_PATH", _DEFAULT_SOUL_PATH),
         mcp_server_script=_path("COGNIBOT_MCP_SERVER_SCRIPT", _DEFAULT_MCP_SCRIPT),
         agenticros_config_path=_path("AGENTICROS_CONFIG_PATH", Path("/app/config/agenticros.json")),
+        memory_db_path=_path("COGNIBOT_MEMORY_DB_PATH", Path("./memory_db")),
+        memory_embedding_url=os.getenv("COGNIBOT_MEMORY_EMBEDDING_URL", "http://localhost:11434"),
     )

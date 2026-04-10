@@ -4,6 +4,13 @@ mcp>=1.0.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0
 textual
+# ─── Semantic Memory (LanceDB + PyArrow) ─────────────────────────────
+lancedb>=0.11.0
+pyarrow>=14.0.0
+# ─── Skill Review Engine (Phase 3) ───────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.29.0
 # ─── Optional LLM Providers ─────────────────────────────────────────
 # Ollama is supported out-of-the-box via pydantic-ai's OpenAI-compatible client.
 # No extra install needed — just set COGNIBOT_LLM_PROVIDER=ollama and OLLAMA_BASE_URL.
+# nomic-embed-text embeddings are served through the same Ollama instance.
