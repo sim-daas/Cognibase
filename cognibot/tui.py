@@ -223,7 +223,8 @@ VerticalScroll > .vertical-scrollbar {
         self.query_one("#chat-input").value = ""
 
         self.add_message("user", user_text)
-        self.run_agent(user_text)
+        timestamped_input = f"[Current Local Time: {datetime.now().isoformat()}]\n{user_text}"
+        self.run_agent(timestamped_input)
 
     def add_message(self, role: str, content: str, is_thinking: bool = False) -> MessageWidget:
         chat_area = self.query_one("#chat-area")
@@ -331,3 +332,5 @@ VerticalScroll > .vertical-scrollbar {
 
     def on_tool_end(self, widget: ToolCallWidget, result: str, success: bool):
         widget.update_result(result, success)
+        if "IMAGE:" in result:
+            self.notify("Camera snapshot captured. Click link in sidebar to view.", title="Image Captured", severity="information")

@@ -67,6 +67,35 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-~/.Xauthority}:${XAUTHORITY:-~/.Xauthority}:rw
 
+  # ─── Node Manager (DeepStream CV Nodes) ────────────────────────────
+  node_manager:
+    image: deepstream_ros2humble:v7.1-yolo
+    container_name: cognibot_node_manager
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=184
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
+      - PIPELINES_DIR=/app/pipelines
+      - DISPLAY=${DISPLAY:-:0}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - ./config:/app/config:ro
+      - ../cortexai/deepstream/pipelines:/app/pipelines
+      - ../cortexai/deepstream/models:/app/pipelines/config/models
+      - ./cognibot/node_manager.py:/app/node_manager.py:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video, compute, utility]
+    stdin_open: true
+    tty: true
+    # command: ["python3", "/app/node_manager.py"]
+
 # ─── Named Volumes ─────────────────────────────────────────────────────────────
 volumes:
   cognibot_memory:

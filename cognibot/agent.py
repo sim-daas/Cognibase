@@ -8,9 +8,12 @@ Creates the CogniBot agent with:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import subprocess
 import time
+import sys
 from typing import Any
 
 from pydantic_ai import Agent, RunContext, Tool
@@ -83,6 +86,11 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
     async def mcp_tool_proxy(ctx: RunContext[AgentDeps], **kwargs: Any) -> str:
         # Display the tool call to the right (CLI)
         arg_json = json.dumps(kwargs, indent=2)
+        
+        # Hard log to stderr bypassing TUI for debugging
+        sys.stderr.write(f"\n[DEBUG] Tool called: {tool_name}\n[DEBUG] Args: {arg_json}\n")
+        sys.stderr.flush()
+        
         panel = Panel(
             Syntax(arg_json, "json", theme="monokai", background_color="default"),
             title=f"🛠️  [bold yellow]Tool Call: {tool_name}[/bold yellow]",
@@ -112,6 +120,23 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
                 _text = block["text"]
                 parts_preview.append(_text[:200])
                 _result_str += _text
+            elif block.get("type") == "image":
+                try:
+                    img_data = block["data"]
+                    img_bytes = base64.b64decode(img_data)
+                    mime = block.get("mimeType", "image/jpeg")
+                    ext = "png" if "png" in mime else "jpg"
+                    fpath = f"/tmp/cognibot_{int(time.time())}.{ext}"
+                    with open(fpath, "wb") as f:
+                        f.write(img_bytes)
+                    # Automatically open the image in the default viewer
+                    try:
+                        subprocess.Popen(["xdg-open", fpath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link] (Opened automatically)[/bold cyan]\n"
+                    except Exception:
+                        _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link][/bold cyan]\n"
+                except Exception as img_err:
+                    _result_str += f"\n[dim red](Image save failed: {img_err})[/dim red]\n"
         
         ctx.deps.tool_call_log.append({
             "tool": tool_name,
