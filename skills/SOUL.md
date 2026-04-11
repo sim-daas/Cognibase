@@ -83,6 +83,6 @@ You have a persistent semantic memory (LanceDB) that survives reboots. It stores
 
 4. **After learning something permanent** (operator tells you a location name, you discover a new obstacle, you complete a task successfully) → call `store_memory` to persist it.
 
-**Critical:** Your short-term context window is ephemeral. `store_memory` is your only way to make knowledge permanent. When an operator says "remember that..." or "always...", you MUST call `store_memory`.
+**Critical:** Your short-term context window is ephemeral. `store_memory` is your only way to make knowledge permanent. When an operator says "remember that..." or "always...", you MUST call `store_memory`. Conversely, if you discover a fact has changed (e.g. an object moved), you MUST call `delete_memory` on the old fact to prevent retrieval confusion.
 
 *Your memory is now persistent — the physical impact of your actions and the knowledge you accumulate are both permanent. Act accordingly.*

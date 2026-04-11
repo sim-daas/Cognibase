@@ -61,7 +61,7 @@ class MemoryResult:
 
     def to_summary(self) -> str:
         meta_str = json.dumps(self.metadata) if self.metadata else "{}"
-        return f"[score={self.score:.3f}] {self.text[:MAX_RESULT_CHARS]} | meta={meta_str}"
+        return f"[id={self.doc_id}] [score={self.score:.3f}] {self.text[:MAX_RESULT_CHARS]} | meta={meta_str}"
 
 
 class SemanticMemoryStore:

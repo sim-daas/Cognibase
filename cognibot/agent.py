@@ -222,7 +222,7 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
     async def query_semantic_memory(
         ctx: RunContext[AgentDeps],
         domain: str,
-        query: str,
+        query: str = "memory",
         n_results: int = 5,
     ) -> str:
         """Search the robot's persistent semantic memory for relevant context.
@@ -237,7 +237,7 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
               - `behavioral`: Past human interactions, successful/failed commands, operator preferences.
               - `env_context`: Time-of-day lighting, crowd densities, scheduled maintenance windows.
               - `policy`: Custom rules like 'never drive near wet floor' or 'prioritize charging'.
-            query: Natural language search query (e.g. 'charging dock location')
+            query: Natural language search query (e.g. 'charging dock location'). To list all entries or browse, pass a general term like 'memory'. NEVER pass an empty string or null, as it will cause an error in the embedding model.
             n_results: Number of results to return (default 5, max 20)
         """
         if ctx.deps.memory is None:
@@ -304,6 +304,45 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
             ctx.deps.console.print(Align.right(f"[bold red]❌ Memory store failed[/bold red]"))
             ctx.deps.end_tool_ui(tui_widget, str(exc), success=False)
             return f"Failed to store memory: {exc}"
+
+    @agent.tool
+    async def delete_memory(
+        ctx: RunContext[AgentDeps],
+        domain: str,
+        doc_id: str,
+    ) -> str:
+        """Delete a specific entry from semantic memory.
+
+        Use this when a fact has become outdated or incorrect (e.g. a piece of
+        furniture has moved, or a policy is no longer in effect).
+        CRITICAL: You MUST NOT invent or ask the human operator for a doc_id. 
+        You MUST find the exact doc_id autonomously by first calling query_semantic_memory 
+        and reading the results before calling delete_memory.
+
+        Args:
+            domain: Memory category — one of: spatial, behavioral, env_context, policy
+            doc_id: The unique ID of the memory entry to remove.
+        """
+        if ctx.deps.memory is None:
+            return "Semantic memory is not initialized."
+            
+        ctx.deps.console.print(Align.right(f"🗑️ [bold red]Deleting Memory [{domain}]: {doc_id[:8]}[/bold red]"))
+        tui_widget = ctx.deps.start_tool_ui("delete_memory", {"domain": domain, "doc_id": doc_id})
+        
+        try:
+            success = await ctx.deps.memory.delete(domain, doc_id)
+            if success:
+                ctx.deps.console.print(Align.right(f"[bold green]✅ Memory deleted[/bold green]"))
+                ctx.deps.end_tool_ui(tui_widget, "Success", success=True)
+                return f"Memory {doc_id} deleted successfully from domain '{domain}'."
+            else:
+                ctx.deps.console.print(Align.right(f"[bold yellow]⚠ Delete failed (not found)[/bold yellow]"))
+                ctx.deps.end_tool_ui(tui_widget, "Not found", success=False)
+                return f"Could not find memory {doc_id} in domain '{domain}'."
+        except Exception as exc:
+            ctx.deps.console.print(Align.right(f"[bold red]❌ Memory delete failed[/bold red]"))
+            ctx.deps.end_tool_ui(tui_widget, str(exc), success=False)
+            return f"Failed to delete memory: {exc}"
 
     # ── 6. Memory-biased navigation planner ──────────────────────────
 
@@ -385,8 +424,8 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
 
 
     logger.info(
-        "Agent created — %d MCP tools + 4 native tools "
-        "(load_skill_context, query_semantic_memory, store_memory, plan_memory_route)",
+        "Agent created — %d MCP tools + 5 native tools "
+        "(load_skill_context, query_semantic_memory, store_memory, plan_memory_route, delete_memory)",
         len(mcp_tools),
     )
 

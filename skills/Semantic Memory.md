@@ -65,6 +65,24 @@ Call `store_memory` to persist new knowledge:
 
 ---
 
+## When to Delete Memory
+
+Call `delete_memory` to remove outdated or conflicting knowledge:
+- When a physical object has moved and its old `spatial` waypoint is no longer valid.
+- When an operator preference has changed and the old `behavioral` entry is obsolete.
+- When a safety `policy` has been repealed or superseded by a new rule.
+
+**CRITICAL WORKFLOW**: To delete an entry, YOU MUST FIRST call `query_semantic_memory` to autonomously find the exact `doc_id` of the memory you wish to remove.
+- Do **NOT** hallucinate a `doc_id`.
+- Do **NOT** ask the human operator for the `doc_id`.
+- Do **NOT** pass an empty string to `query_semantic_memory`. If you just want to browse, pass a broad query like `query="memory"`.
+
+```
+→ delete_memory(domain="spatial", doc_id="550e8400-e29b-411d-a716-446655440000")
+```
+
+---
+
 ## Memory-Biased Navigation
 
 For any navigation task where the destination has a human-readable name, ALWAYS call `plan_memory_route` first:
