@@ -27,5 +27,6 @@ log/
 *.swo
 
 # Environment variables
-.env
 chats/
+scratch/
+*.env

@@ -17,7 +17,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Input, Static, Select
 
 from cognibot.agent import AgentDeps
 from pydantic_ai import Agent
@@ -108,6 +108,11 @@ class CogniBotTUI(App):
     layout: vertical;
 }
 
+#think-select {
+    margin: 1 0;
+    height: auto;
+}
+
 #tool-calls-list {
     height: 1fr;
     margin-top: 1;
@@ -182,7 +187,8 @@ VerticalScroll > .vertical-scrollbar {
         super().__init__()
         self.agent = agent
         self.deps = deps
-        self.history = history or []
+        self.history: List[Any] = []
+        self.msg_count = 0
         # Inject TUI hooks into deps
         self.deps.tui_on_tool_start = self.on_tool_start
         self.deps.tui_on_tool_end = self.on_tool_end
@@ -197,6 +203,12 @@ VerticalScroll > .vertical-scrollbar {
             with Vertical(id="sidebar"):
                 yield Static("ACTIVE CONTEXT", classes="sidebar-title")
                 yield Static(f"Model: [dim]{self.deps.config.llm_model}[/dim]")
+                yield Select(
+                    [("Low", "low"), ("Medium", "medium"), ("High", "high")],
+                    value="medium",
+                    id="think-select",
+                    prompt="Thinking Mode"
+                )
                 yield Static("\nMODIFIED TOOLS", classes="sidebar-title")
                 yield VerticalScroll(id="tool-calls-list")
 
@@ -236,87 +248,38 @@ VerticalScroll > .vertical-scrollbar {
     @work(exclusive=True)
     async def run_agent(self, user_input: str) -> None:
         chat_area = self.query_one("#chat-area")
-        
-        response_text = ""
-        response_widget = None
+        self.msg_count += 1
+        now = datetime.now().strftime("%H:%M")
+        context_prefix = f"[[Msg #{self.msg_count}, {now}]] "
+        full_input = context_prefix + user_input
 
+        # UI placeholder while waiting
+        if not (response_widget := getattr(self, "last_response_widget", None)):
+            response_widget = self.add_message("bot", "⏳ Thinking...")
+        
         try:
-            async with self.agent.run_stream(
-                user_input,
+            think_mode = self.query_one("#think-select").value
+            # 1. Switch from run_stream to run (Non-streaming)
+            # This waits for the full response from Ollama/Proxy
+            result = await self.agent.run(
+                full_input,
                 deps=self.deps,
                 message_history=self.history if self.history else None,
-                model_settings={"extra_body": {"think": "high"}},
-            ) as result:
-                
-                # PydanticAI models sometimes strip out <think> tags natively, or chunk them weirdly.
-                # Use a buffer to catch "<think>" across split chunks
-                buffer = ""
-                in_think = False
-                thinking_text = ""
-                
-                async for chunk in result.stream_text(delta=True):
-                    buffer += chunk
-                    
-                    # We process based on the buffer content
-                    if not in_think:
-                        if "<think>" in buffer:
-                            parts = buffer.split("<think>", 1)
-                            # Content before <think> belongs to early response text (usually none)
-                            if parts[0]:
-                                if not response_widget:
-                                    response_widget = self.add_message("bot", "")
-                                response_text += parts[0]
-                                response_widget.content = response_text
-                                response_widget.refresh()
-                            
-                            in_think = True
-                            buffer = parts[1] # Keep the rest as thinking text
-                        else:
-                            # Not found yet, keep buffering if it ends in a partial tag
-                            if buffer.endswith("<") or buffer.endswith("<t") or buffer.endswith("<th") or buffer.endswith("<thi") or buffer.endswith("<thin") or buffer.endswith("<think") or buffer.endswith("<think>"):
-                                pass # Wait for next chunk
-                            else:
-                                if not response_widget:
-                                    response_widget = self.add_message("bot", "")
-                                response_text += buffer
-                                response_widget.content = response_text
-                                response_widget.refresh()
-                                buffer = ""
-                    
-                    if in_think:
-                        if "</think>" in buffer:
-                            parts = buffer.split("</think>", 1)
-                            thinking_text += parts[0]
-                            
-                            in_think = False
-                            buffer = parts[1] # Keep the rest as regular response text
-                            if buffer:
-                                if not response_widget:
-                                    response_widget = self.add_message("bot", "")
-                                response_text += buffer
-                                response_widget.content = response_text
-                                response_widget.refresh()
-                                buffer = ""
-                        else:
-                            # Might be partial closing tag
-                            if buffer.endswith("<") or buffer.endswith("</") or buffer.endswith("</t") or buffer.endswith("</th") or buffer.endswith("</thi") or buffer.endswith("</thin") or buffer.endswith("</think") or buffer.endswith("</think>"):
-                                pass # Wait for next chunk
-                            else:
-                                thinking_text += buffer
-                                buffer = ""
+                # Ensure thinking is requested
+                model_settings={"thinking": think_mode}, 
+            )
 
-                # Flush any remaining buffer
-                if buffer:
-                    if in_think:
-                        thinking_text += buffer
-                    else:
-                        if not response_widget:
-                            response_widget = self.add_message("bot", "")
-                        response_text += buffer
-                        response_widget.content = response_text
-                        response_widget.refresh()
-                
-                self.history.extend(result.new_messages())
+            # 2. Extract the final text content
+            # PydanticAI automatically gathers all TextParts into result.data
+            final_text = result.output
+
+            # 3. Update the UI with the final answer
+            response_widget.content = final_text
+            response_widget.refresh()
+
+            # 4. Save the history (Standard PydanticAI practice)
+            self.history.extend(result.new_messages())
+
                 
         except Exception as e:
             self.add_message("system", f"Error: {str(e)}")

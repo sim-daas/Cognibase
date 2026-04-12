@@ -23,9 +23,11 @@ class SkillMeta:
     file_path: Path
 
 
-# Extract SKILL_ID and DESCRIPTION, ignoring markdown bold tags and escaped underscores
+# Extract SKILL_ID and DESCRIPTION headers.
+# 1. Capture ID (alphanumeric, -, _, \).
+# 2. Capture DESCRIPTION text until a closing ** or the end of the line.
 _HEADER_RE = re.compile(
-    r"SKILL\\?_ID:\s*([a-zA-Z0-9_\-\\]+).*?DESCRIPTION:\s*(.+?)(?:\*\*\s*$|$)",
+    r"SKILL\\?_ID:\s*([a-zA-Z0-9_\-\\]+).*?DESCRIPTION:\s*(?:\*\*)?(.+?)(?:\*\*|(?:\r?\n|$))",
     re.IGNORECASE | re.DOTALL,
 )
 

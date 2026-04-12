@@ -76,7 +76,7 @@ export const TOOLS: McpTool[] = [
         },
         timeout: {
           type: "number",
-          description: "Maximum time in milliseconds to wait for the image capture and model inference. Default is 30,000ms. Increase this for complex prompts or high-latency network conditions.",
+          description: "Maximum time in milliseconds to wait for the image capture and model inference. Default is 60,000ms. Increase this for complex prompts or high-latency network conditions.",
         },
       },
       required: ["prompt"],
@@ -122,7 +122,7 @@ export const TOOLS: McpTool[] = [
         },
         timeout: {
           type: "number",
-          description: "How long to wait for a message to arrive in milliseconds. Default is 5,000ms. Increase for slow-publishing sensors like low-frequency environmental monitors.",
+          description: "How long to wait for a message to arrive in milliseconds. Default is 1,500ms. Increase for slow-publishing sensors like low-frequency environmental monitors.",
         },
       },
       required: ["topic"],
@@ -350,7 +350,7 @@ export async function handleToolCall(
       const rawTopic = (args["topic"] as string | undefined) ?? defaultTopic;
       const topic = toNamespacedTopic(config, rawTopic);
       const prompt = args["prompt"] as string;
-      const timeout = (args["timeout"] as number | undefined) ?? 30000;
+      const timeout = (args["timeout"] as number | undefined) ?? 60000;
       const messageType: "CompressedImage" | "Image" = topic.includes("compressed") ? "CompressedImage" : "Image";
       const type = messageType === "Image" ? IMAGE_TYPE : COMPRESSED_IMAGE_TYPE;
 
@@ -479,7 +479,7 @@ export async function handleToolCall(
       const rawTopic = args["topic"] as string;
       const topic = toNamespacedTopic(config, rawTopic);
       let msgType = args["type"] as string | undefined;
-      const timeout = (args["timeout"] as number | undefined) ?? 5000;
+      const timeout = (args["timeout"] as number | undefined) ?? 1500;
       if (!msgType && /\/?(camera|image|color|depth)/i.test(rawTopic)) {
         msgType = rawTopic.includes("compressed") ? "sensor_msgs/msg/CompressedImage" : "sensor_msgs/msg/Image";
       }

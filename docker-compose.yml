@@ -29,11 +29,15 @@ services:
       - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
       - COGNIBOT_CONFIG_PATH=/app/config/cognibot.env
       - AGENTICROS_CONFIG_PATH=/app/config/agenticros.json
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - XDG_RUNTIME_DIR=/tmp/runtime-root
     volumes:
       - ./cognibot:/app/cognibot        # live-reload Python source
       - ./skills:/app/skills            # live-reload skills/SOUL.md
       - ./config:/app/config            # live-reload agenticros.json, cognibot.env
       - cognibot_memory:/app/memory_db  # persistent LanceDB vector store
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
     depends_on:
       rosbridge:
         condition: service_started

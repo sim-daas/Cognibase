@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+logging.getLogger("httpx").setLevel(logging.DEBUG) 
 import sys
 from typing import Any
 

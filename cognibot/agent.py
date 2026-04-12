@@ -129,10 +129,16 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
                     fpath = f"/tmp/cognibot_{int(time.time())}.{ext}"
                     with open(fpath, "wb") as f:
                         f.write(img_bytes)
-                    # Automatically open the image in the default viewer
+                    # Automatically open the image in the default viewer (feh)
                     try:
-                        subprocess.Popen(["xdg-open", fpath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link] (Opened automatically)[/bold cyan]\n"
+                        subprocess.Popen(
+                            ["feh", fpath],
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True
+                        )
+                        _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link] (Opened with feh)[/bold cyan]\n"
                     except Exception:
                         _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link][/bold cyan]\n"
                 except Exception as img_err:
