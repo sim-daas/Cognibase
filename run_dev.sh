@@ -1,7 +1,7 @@
 #!/bin/bash
 
-IMAGE="${1:-cognibase:humble}"
-CONTAINER_NAME="${2:-tb3_remote_env}"
+IMAGE="${1:-cognibase:jazzy}"
+CONTAINER_NAME="${2:-cognisim}"
 HOST_REPO_PATH="${3:-$(pwd)}"
 CONTAINER_REPO_PATH="/root/turtlebot3_ws/src/"
 

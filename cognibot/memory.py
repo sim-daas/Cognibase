@@ -160,7 +160,7 @@ class SemanticMemoryStore:
             return [float(v) for v in vec]
 
         try:
-            return await asyncio.get_event_loop().run_in_executor(None, _do_request)
+            return await asyncio.get_running_loop().run_in_executor(None, _do_request)
         except Exception as exc:
             raise RuntimeError(
                 f"Embedding failed (Ollama at {url}): {exc}. "
@@ -258,6 +258,10 @@ class SemanticMemoryStore:
         self._validate_domain(domain)
         if not _LANCEDB_AVAILABLE:
             return False
+        # Validate doc_id format to prevent SQL injection via LLM-generated strings
+        import re
+        if not re.match(r'^[a-fA-F0-9\-]{36}$', doc_id):
+            raise ValueError(f"Invalid doc_id format: '{doc_id}'. Expected UUID.")
         table = self._tables[domain]
         await table.delete(f"doc_id = '{doc_id}'")
         return True

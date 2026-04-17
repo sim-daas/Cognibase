@@ -34,6 +34,7 @@ class CogniBotConfig:
     # ── LLM ──────────────────────────────────────────────────────────
     llm_provider: str = "gemini"
     llm_model: str = "google-gla:gemini-2.0-flash"
+    nvidia_api_key: str | None = None
 
     # ── Paths ────────────────────────────────────────────────────────
     skills_dir: Path = _DEFAULT_SKILLS_DIR
@@ -59,6 +60,9 @@ class CogniBotConfig:
         if self.agenticros_config_path.exists():
             env["AGENTICROS_CONFIG_PATH"] = str(self.agenticros_config_path)
         
+        if self.nvidia_api_key:
+            env["NVIDIA_API_KEY"] = self.nvidia_api_key
+
         ollama_base = os.getenv("OLLAMA_BASE_URL")
         if ollama_base:
             env["OLLAMA_BASE_URL"] = ollama_base
@@ -87,12 +91,14 @@ def load_config(env_file: str | Path | None = None) -> CogniBotConfig:
         "gemini": "google-gla:gemini-2.0-flash",
         "ollama": "ollama:llama3.2",
         "groq": "groq:llama-3.3-70b-versatile",
+        "nvidia": "meta/llama-4-maverick-17b-128e-instruct",
     }
     model = os.getenv("COGNIBOT_LLM_MODEL", model_defaults.get(provider, model_defaults["gemini"]))
 
     return CogniBotConfig(
         llm_provider=provider,
         llm_model=model,
+        nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
         skills_dir=_path("COGNIBOT_SKILLS_DIR", _DEFAULT_SKILLS_DIR),
         soul_path=_path("COGNIBOT_SOUL_PATH", _DEFAULT_SOUL_PATH),
         mcp_server_script=_path("COGNIBOT_MCP_SERVER_SCRIPT", _DEFAULT_MCP_SCRIPT),

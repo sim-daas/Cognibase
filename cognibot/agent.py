@@ -23,6 +23,15 @@ from cognibot.mcp_client import MCPBridge
 from cognibot.memory import DOMAINS, SemanticMemoryStore
 from cognibot.skill_loader import compile_system_prompt, load_skill_content
 
+class YieldInterrupt(Exception):
+    """Raised when the LLM wants to yield context and execution to Mission Control."""
+    def __init__(self, state: str, milestone_idx: int, next_action: str, target_node: str | None):
+        self.state = state
+        self.milestone_idx = milestone_idx
+        self.next_action = next_action
+        self.target_node = target_node
+        super().__init__(f"Yielding to Mission Control: {state}")
+
 logger = logging.getLogger(__name__)
 
 from rich.console import Console
@@ -55,6 +64,10 @@ class AgentDeps:
 
         # Phase 3: Tool call log (populated by _make_mcp_tool_fn wrapper)
         self.tool_call_log: list[dict[str, Any]] = []
+        
+        # Task Planner Context
+        self.active_task_plan: dict[str, Any] | None = None
+        self.heavy_tool_count: int = 0
 
         # TUI Hooks (to be injected by the TUI app if running)
         self.tui_on_tool_start = None
@@ -99,6 +112,19 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
         )
         ctx.deps.console.print(Align.right(panel))
 
+        # Hardware Interception Rule (Task Planner)
+        heavy_tools = {"ros2_action_goal", "ros2_cmd_vel_duration", "ros2_vla_query", "ros2_publish"}
+        if tool_name in heavy_tools:
+            if ctx.deps.active_task_plan is None:
+                ctx.deps.heavy_tool_count += 1
+                if ctx.deps.heavy_tool_count > 2:
+                    error_msg = (
+                        "ERROR: You have attempted too many complex or physical actions without a plan. "
+                        "You must use `create_task_plan` to outline your milestones before proceeding further."
+                    )
+                    ctx.deps.console.print(Align.right("[bold red]🚨 BLOCKED: Task Plan Required[/bold red]"))
+                    return error_msg
+
         # TUI Notification
         tui_widget = ctx.deps.start_tool_ui(tool_name, kwargs)
 
@@ -112,15 +138,18 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
         else:
             ctx.deps.console.print(Align.right(f"[bold green]✅ Tool Success: {tool_name}[/bold green]"))
 
-        # Phase 3: append to tool call log
+        # Single-pass content processing: build LLM response, log preview, and TUI result
         parts_preview: list[str] = []
+        parts_llm: list[str] = []
         _result_str = ""
         for block in result.get("content", []):
             if block.get("type") == "text":
                 _text = block["text"]
                 parts_preview.append(_text[:200])
+                parts_llm.append(_text)
                 _result_str += _text
             elif block.get("type") == "image":
+                parts_llm.append(f"[Image captured: {block.get('mimeType', 'image/jpeg')}]")
                 try:
                     img_data = block["data"]
                     img_bytes = base64.b64decode(img_data)
@@ -138,11 +167,11 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
                             stderr=subprocess.DEVNULL,
                             start_new_session=True
                         )
-                        _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link] (Opened with feh)[/bold cyan]\n"
+                        _result_str += f"\n📷 IMAGE: {fpath} (Opened with feh)\n"
                     except Exception:
-                        _result_str += f"\n[bold cyan]📷 IMAGE: [link=file://{fpath}]VIEW CAPTURE[/link][/bold cyan]\n"
+                        _result_str += f"\n📷 IMAGE: {fpath}\n"
                 except Exception as img_err:
-                    _result_str += f"\n[dim red](Image save failed: {img_err})[/dim red]\n"
+                    _result_str += f"\n(Image save failed: {img_err})\n"
         
         ctx.deps.tool_call_log.append({
             "tool": tool_name,
@@ -156,14 +185,7 @@ def _make_mcp_tool_fn(tool_name: str, description: str, input_schema: dict[str, 
         # TUI Notification
         ctx.deps.end_tool_ui(tui_widget, _result_str[:200], not is_error)
 
-        # Stringify content blocks for the LLM
-        parts: list[str] = []
-        for block in result.get("content", []):
-            if block.get("type") == "text":
-                parts.append(block["text"])
-            elif block.get("type") == "image":
-                parts.append(f"[Image captured: {block.get('mimeType', 'image/jpeg')}]")
-        return "\n".join(parts) if parts else "(no output)"
+        return "\n".join(parts_llm) if parts_llm else "(no output)"
 
     mcp_tool_proxy.__name__ = tool_name
     mcp_tool_proxy.__qualname__ = tool_name
@@ -215,8 +237,21 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
     )
 
     # ── 3. Create agent with tools ───────────────────────────────────
+    model_to_use = config.llm_model
+    
+    # If using NVIDIA NIM, wrap it in OpenAIChatModel with the NVIDIA endpoint
+    if config.llm_provider == "nvidia":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+        
+        nvidia_provider = OpenAIProvider(
+            base_url='https://integrate.api.nvidia.com/v1',
+            api_key=config.nvidia_api_key
+        )
+        model_to_use = OpenAIChatModel(config.llm_model, provider=nvidia_provider)
+
     agent: Agent[AgentDeps, str] = Agent(
-        model=config.llm_model,
+        model=model_to_use,
         system_prompt=system_prompt,
         deps_type=AgentDeps,
         tools=tool_objects,
@@ -244,6 +279,67 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
             ctx.deps.console.print(Align.right(f"[bold red]❌ Skill Load Failed: {skill_id}[/bold red]"))
             ctx.deps.end_tool_ui(tui_widget, str(e), success=False)
             return str(e)
+
+    @agent.tool
+    async def create_task_plan(
+        ctx: RunContext[AgentDeps],
+        goal: str,
+        milestones: list[str],
+        required_nodes: list[str]
+    ) -> str:
+        """MANDATORY FIRST STEP for any complex, multi-step physical command.
+        
+        Deconstructs the human's command into discrete, verifiable robotic milestones before acting.
+        Call this immediately when the user asks for a complex action or routine.
+        If you call more than 2 heavy/physical tools without planning first, you will be blocked.
+        
+        Args:
+            goal: The overarching objective (e.g., 'Locate missing blue bottle').
+            milestones: Array of 3-5 specific steps (e.g., ['Query memory for lab coordinates', 'Navigate to lab']).
+            required_nodes: Name of ROS2 nodes that must be active (e.g., ['nav2', 'vla_server']).
+        """
+        ctx.deps.active_task_plan = {
+            "goal": goal,
+            "milestones": milestones,
+            "required_nodes": required_nodes
+        }
+        ctx.deps.heavy_tool_count = 0  # Reset counter once plan is active
+        
+        # Write to physical file for Mission Control access
+        plan_path = "/tmp/cognibot_task_plan.json"
+        try:
+            with open(plan_path, "w") as f:
+                json.dump(ctx.deps.active_task_plan, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to write task plan to disk: {e}")
+        
+        ctx.deps.console.print(Align.right(f"📋 [bold yellow]Task Plan Saved to Disk:[/bold yellow] {goal}"))
+        for i, m in enumerate(milestones, 1):
+            ctx.deps.console.print(Align.right(f"   [dim]{i}. {m}[/dim]"))
+            
+        return f"Task Plan '{goal}' successfully registered and saved. Proceed with your first milestone."
+
+    @agent.tool
+    async def yield_status(
+        ctx: RunContext[AgentDeps],
+        state: str,
+        current_milestone_index: int,
+        next_action: str,
+        target_node: str | None = None
+    ) -> str:
+        """Call this to pause your cognitive loop, clear context, or wait on hardware.
+        
+        MUST be called after completing a milestone, running into a task that takes time 
+        (like starting Nav2 or exploration), or reaching an error you cannot solve.
+        
+        Args:
+            state: One of ["MILESTONE_COMPLETE", "WAITING_ON_NODE", "BLOCKED", "REQUIRE_HUMAN"].
+            current_milestone_index: Where you are in the JSON task plan array (1-indexed).
+            next_action: A brief instruction to YOURSELF for when Mission Control wakes you back up.
+            target_node: If WAITING_ON_NODE, the ROS2 node name you are waiting on.
+        """
+        ctx.deps.console.print(Align.right(f"⏸️  [bold yellow]Yielding to Mission Control...[/bold yellow]"))
+        raise YieldInterrupt(state, current_milestone_index, next_action, target_node)
 
     # ── 5. Semantic Memory tools ──────────────────────────────────────
     _domains_str = ", ".join(DOMAINS.keys())
@@ -455,8 +551,9 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
 
 
     logger.info(
-        "Agent created — %d MCP tools + 5 native tools "
-        "(load_skill_context, query_semantic_memory, store_memory, plan_memory_route, delete_memory)",
+        "Agent created — %d MCP tools + 7 native tools "
+        "(load_skill_context, create_task_plan, yield_status, "
+        "query_semantic_memory, store_memory, delete_memory, plan_memory_route)",
         len(mcp_tools),
     )
 

@@ -120,6 +120,9 @@ Two supported transport modes:
 | Tool | Description | ROS2 Mechanism |
 |------|-------------|----------------|
 | `ros2_list_topics` | List all topics and their types | rosapi service call |
+| `ros2_list_services` | List all services | rosapi service call |
+| `ros2_list_actions` | List all action servers and types | rosapi service call |
+| `ros2_list_nodes` | List all active ROS 2 nodes | `/rosapi/nodes` service |
 | `ros2_publish` | Publish to a topic (e.g., `/cmd_vel`) | Topic publisher |
 | `ros2_subscribe_once` | Get next message from a topic | One-shot subscriber |
 | `ros2_service_call` | Call a ROS2 service | Service client |
@@ -127,7 +130,10 @@ Two supported transport modes:
 | `ros2_param_get` | Get a node parameter | Parameter service |
 | `ros2_param_set` | Set a node parameter | Parameter service |
 | `ros2_camera_snapshot` | Capture one frame from camera topic | Subscriber + image decode |
+| `ros2_vla_query` | Camera capture → NVIDIA NIM VLM inference | Subscriber + NVIDIA API |
 | `ros2_depth_distance` | Distance in meters from depth camera | Depth topic subscriber |
+| `ros2_cmd_vel_duration` | Sustained velocity for N seconds @ 10Hz | Timed publisher |
+| `ros2_query_state` | Aggregated odom + 8-sector LIDAR + cmd_vel | Multi-topic subscriber |
 
 ### Build (inside Orchestrator container)
 
@@ -194,13 +200,13 @@ async with stdio_client(server_params) as (read, write):
 
 ---
 
-## **7. Planned Extensions: Continuous Learning & Memory**
+## **7. Continuous Learning & Memory (Implemented)**
 
-CogniBot is moving toward a self-optimizing architecture where real-world performance is fed back into the skill definition layer.
+CogniBot includes a self-optimizing architecture where real-world performance is fed back into the skill definition layer.
 
-- **Skill-Review Engine**: Post-mission analysis of tool calls and outcomes to identify latency spikes or logic failures.
-- **Semantic Memory Layer**: A persistent DB storing spatial knowledge (preferred routes), behavioral history (user preferences), and environmental context (busy times).
-- **Adaptive Navigation**: Using semantic memory to "bias" Nav2 via route injection (`set_plan`), dynamic costmap markers, and Behavior-Tree selection.
+- **Skill-Review Engine** (`cognibot/review.py`): Post-mission analysis of tool calls and outcomes to identify latency spikes or logic failures. Exposed via a FastAPI endpoint on port 8765.
+- **Semantic Memory Layer** (`cognibot/memory.py`): A persistent LanceDB vector store with Ollama `nomic-embed-text` embeddings, storing spatial knowledge (preferred routes), behavioral history (user preferences), environmental context (busy times), and operational policies.
+- **Memory-Biased Navigation**: Using semantic memory to inform Nav2 via route injection through `plan_memory_route`, with support for `/navigate_through_poses` waypoint following.
 
 **Detailed Blueprint:** [Project Additions & Continuous Improvement](file:///home/ubuntu/githubrepos/Cognibase/docs/Project%20Additions%20%26%20Continuous%20Improvement.md)
 

@@ -2,6 +2,10 @@
  * MCP tool definitions and handler. Mirrors OpenClaw adapter tools.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+
 import type { AgenticROSConfig } from "@agenticros/core";
 import { toNamespacedTopic } from "@agenticros/core";
 import { getTransport } from "./transport.js";
@@ -277,6 +281,12 @@ export const TOOLS: McpTool[] = [
       required: ["linear_x", "angular_z", "duration"],
     },
   },
+  {
+    name: "ros2_query_state",
+    description:
+      "Provides a comprehensive, high-level snapshot of the robot's current physical state by aggregating data from multiple key topics (/odom, /scan, /cmd_vel). This is your primary diagnostic tool to understand where the robot is, how fast it's moving, and what obstacles are nearby. It processes high-density sensor data (like LIDAR scans) into a simplified, 8-directional 'radar' view (Front, Back, Left, Right, and diagonals) showing the minimum distance to obstacles in each sector. Use this frequently for spatial awareness, safety checks, and to verify that motion commands are having the intended effect. All topics are queried in parallel for maximum efficiency.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 export type ToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
@@ -381,54 +391,90 @@ export async function handleToolCall(
         return { content: [{ type: "text", text: "Failed to capture image for VLA query." }], isError: true };
       }
 
-      // 2. Query Ollama
-      let ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-      if (ollamaUrl.endsWith("/v1")) {
-         ollamaUrl = ollamaUrl.slice(0, -3);
+      // 2. Query NVIDIA NIM VLA endpoint
+      let nvidiaApiKey = process.env.NVIDIA_API_KEY;
+
+      if (!nvidiaApiKey) {
+        // Fallback: try to load from config/cognibot.env relative to workspace or known paths
+        const envPaths = [
+          "/app/config/cognibot.env",
+          path.resolve(process.cwd(), "config/cognibot.env"),
+          path.resolve(process.cwd(), "../../config/cognibot.env"),
+          path.resolve(os.homedir(), ".agenticros/cognibot.env"),
+        ];
+
+        for (const envPath of envPaths) {
+          try {
+            if (fs.existsSync(envPath)) {
+              const content = fs.readFileSync(envPath, "utf8");
+              const match = content.match(/^NVIDIA_API_KEY\s*=\s*(.*)$/m);
+              if (match && match[1]) {
+                nvidiaApiKey = match[1].trim();
+                break;
+              }
+            }
+          } catch (e) {}
+        }
       }
-      
+      const nvidiaUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+      const vlaModel = "nvidia/nemotron-nano-12b-v2-vl";
+
+      if (!nvidiaApiKey) {
+        return { content: [{ type: "text", text: "VLA reasoning failed: NVIDIA_API_KEY environment variable is not set." }], isError: true };
+      }
+
+      // Detect image format from topic name; default to jpeg for compressed streams
+      const imageMediaType = messageType === "Image" ? "image/png" : "image/jpeg";
+
       try {
         const controller = new AbortController();
-        const fetchTimer = setTimeout(() => controller.abort(), timeout - 10000); 
-        
-        const response = await fetch(`${ollamaUrl}/api/chat`, {
+        const fetchTimer = setTimeout(() => controller.abort(), timeout);
+
+        const response = await fetch(nvidiaUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${nvidiaApiKey}`,
+          },
           body: JSON.stringify({
-            model: "qwen3-vl",
-            options: {
-              num_ctx: 4096
-            },
+            model: vlaModel,
             stream: false,
+            max_tokens: 512,
             messages: [
               {
                 role: "user",
-                content: prompt,
-                images: [base64Image]
+                content: [
+                  { type: "text", text: prompt },
+                  { type: "image_url", image_url: { url: `data:${imageMediaType};base64,${base64Image}` } }
+                ]
               }
             ]
           }),
-          signal: controller.signal
+          signal: controller.signal,
         });
-        
+
         clearTimeout(fetchTimer);
 
         if (!response.ok) {
-           throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+          const errText = await response.text().catch(() => response.statusText);
+          throw new Error(`NVIDIA API error: ${response.status} ${errText}`);
         }
 
         const data = await response.json() as Record<string, unknown>;
         let output = "No response generated";
-        if (data.message && typeof data.message === "object") {
-           const msg = data.message as Record<string, unknown>;
-           output = String(msg.content || output);
+        const choices = data.choices as Array<Record<string, unknown>> | undefined;
+        if (choices && choices.length > 0) {
+          const msg = choices[0].message as Record<string, unknown> | undefined;
+          if (msg) output = String(msg.content || output);
         }
-        return { content: [{ type: "text", text: `[VLA Output via ${topic}]:\n${output}` }] };
+        return { content: [{ type: "text", text: `[VLA Output via ${topic} | ${vlaModel}]:\n${output}` }] };
       } catch (err: any) {
         const msg = err instanceof Error ? err.message : String(err);
         const cause = err.cause ? ` (Cause: ${err.cause.message || err.cause})` : "";
-        return { content: [{ type: "text", text: `VLA reasoning failed: ${msg}${cause} [Attempted: ${ollamaUrl}/api/chat]` }], isError: true };
+        return { content: [{ type: "text", text: `VLA reasoning failed: ${msg}${cause} [Attempted: ${nvidiaUrl}]` }], isError: true };
       }
+
     }
 
     case "ros2_publish": {
@@ -692,17 +738,124 @@ export async function handleToolCall(
                 type: "geometry_msgs/msg/Twist",
                 msg: { linear: { x: 0, y: 0, z: 0 }, angular: { x: 0, y: 0, z: 0 } }
               });
-            } catch (e) {}
+            } catch (e) {
+              if (process.stderr?.write) process.stderr.write(`[AgenticROS] cmd_vel_duration stop-publish failed: ${e}\n`);
+            }
             resolve();
             return;
           }
           try {
             await transport.publish({ topic, type: "geometry_msgs/msg/Twist", msg: message });
-          } catch (e) {}
+          } catch (e) {
+            if (process.stderr?.write) process.stderr.write(`[AgenticROS] cmd_vel_duration publish failed: ${e}\n`);
+          }
         }, 100);
       });
 
       return { content: [{ type: "text", text: `Successfully published velocity to ${topic} for ${duration} seconds.` }] };
+    }
+
+    case "ros2_query_state": {
+      const topics = await transport.listTopics();
+      const targetTopics = ["/odom", "/scan", "/cmd_vel"];
+      const activeTopics = topics.filter((t) => targetTopics.includes(t.name));
+      const timeout = 1500;
+
+      const stateRecords: Record<string, any> = {
+        timestamp: new Date().toISOString(),
+        active_topics: activeTopics.map(t => t.name)
+      };
+
+      const promises: Promise<void>[] = activeTopics.map(async (t) => {
+        const topic = toNamespacedTopic(config, t.name);
+        try {
+          const result = await new Promise<any>((resolve, reject) => {
+            const sub = transport.subscribe({ topic, type: t.type }, (msg) => {
+              clearTimeout(timer);
+              sub.unsubscribe();
+              resolve(msg);
+            });
+            const timer = setTimeout(() => {
+              sub.unsubscribe();
+              reject(new Error("Timeout"));
+            }, timeout);
+          });
+
+          // Process based on topic name
+          if (t.name === "/scan") {
+            const ranges = (result.ranges as number[]) || [];
+            const angleMin = result.angle_min || 0;
+            const angleInc = result.angle_increment || (2 * Math.PI) / ranges.length;
+            
+            const sectors: Record<string, number> = {
+              Front: Infinity, Front_Left: Infinity, Left: Infinity, Back_Left: Infinity,
+              Back: Infinity, Back_Right: Infinity, Right: Infinity, Front_Right: Infinity
+            };
+
+            ranges.forEach((dist, i) => {
+              if (dist === null || isNaN(dist) || dist <= 0) return;
+              let angle = angleMin + i * angleInc;
+              // Normalize to [0, 2PI)
+              angle = ((angle % (2 * Math.PI)) + (2 * Math.PI)) % (2 * Math.PI);
+              const deg = (angle * 180) / Math.PI;
+
+              let sector = "";
+              if (deg >= 337.5 || deg < 22.5) sector = "Front";
+              else if (deg >= 22.5 && deg < 67.5) sector = "Front_Left";
+              else if (deg >= 67.5 && deg < 112.5) sector = "Left";
+              else if (deg >= 112.5 && deg < 157.5) sector = "Back_Left";
+              else if (deg >= 157.5 && deg < 202.5) sector = "Back";
+              else if (deg >= 202.5 && deg < 247.5) sector = "Back_Right";
+              else if (deg >= 247.5 && deg < 292.5) sector = "Right";
+              else if (deg >= 292.5 && deg < 337.5) sector = "Front_Right";
+
+              if (sector && dist < sectors[sector]) {
+                sectors[sector] = dist;
+              }
+            });
+
+            // Clean up Infinity
+            for (const key in sectors) {
+              if (sectors[key] === Infinity) sectors[key] = -1; // -1 means no reading
+              else sectors[key] = Math.round(sectors[key] * 100) / 100; // Round to 2 decimals
+            }
+            stateRecords.obstacles_min_dist = sectors;
+          } else if (t.name === "/odom") {
+            stateRecords.odom = {
+              pos: {
+                x: Math.round(result.pose?.pose?.position?.x * 1000) / 1000 || 0,
+                y: Math.round(result.pose?.pose?.position?.y * 1000) / 1000 || 0,
+                z: Math.round(result.pose?.pose?.position?.z * 1000) / 1000 || 0
+              },
+              ori: {
+                x: Math.round(result.pose?.pose?.orientation?.x * 1000) / 1000 || 0,
+                y: Math.round(result.pose?.pose?.orientation?.y * 1000) / 1000 || 0,
+                z: Math.round(result.pose?.pose?.orientation?.z * 1000) / 1000 || 0,
+                w: Math.round(result.pose?.pose?.orientation?.w * 1000) / 1000 || 0
+              },
+              vel: {
+                linear: {
+                  x: Math.round(result.twist?.twist?.linear?.x * 1000) / 1000 || 0,
+                  y: Math.round(result.twist?.twist?.linear?.y * 1000) / 1000 || 0
+                },
+                angular: {
+                  z: Math.round(result.twist?.twist?.angular?.z * 1000) / 1000 || 0
+                }
+              }
+            };
+          } else if (t.name === "/cmd_vel") {
+            stateRecords.last_cmd_vel = {
+              linear: result.linear?.x || 0,
+              angular: result.angular?.z || 0
+            };
+          }
+        } catch (e) {
+          // If a topic fails, we just don't include it in stateRecords
+        }
+      });
+
+      await Promise.all(promises);
+      return { content: [{ type: "text", text: JSON.stringify(stateRecords, null, 2) }] };
     }
 
     default:

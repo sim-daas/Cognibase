@@ -305,7 +305,7 @@ async def start_review_api(skills_dir: Path, host: str = "0.0.0.0", port: int = 
 
 def _iso8601(ts: float) -> str:
     import datetime
-    return datetime.datetime.utcfromtimestamp(ts).isoformat() + "Z"
+    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
 
 
 def _suggest_thresholds(tool: str, avg_latency_ms: float, success_rate: float) -> dict[str, Any]:

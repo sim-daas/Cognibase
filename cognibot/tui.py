@@ -19,8 +19,9 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Header, Input, Static, Select
 
-from cognibot.agent import AgentDeps
 from pydantic_ai import Agent
+from cognibot.agent import AgentDeps, YieldInterrupt
+import os
 
 
 class MessageWidget(Static):
@@ -280,6 +281,41 @@ VerticalScroll > .vertical-scrollbar {
             # 4. Save the history (Standard PydanticAI practice)
             self.history.extend(result.new_messages())
 
+        except YieldInterrupt as y:
+            # 1. Clear LLM Context (Amnesia)
+            self.history.clear()
+            response_widget.content = f"🛑 Yield Triggered: {y.state}"
+            response_widget.refresh()
+            self.add_message("system", f"Mission Control: LLM context cleared. Target node: {y.target_node}")
+            
+            # 2. Simulate Mission Control Hardware Loop
+            if y.state == "WAITING_ON_NODE":
+                self.add_message("system", f"[Hardware Supervisor] 🛰️ Waiting on ROS2 node: {y.target_node}...")
+                
+                # Background wait logic
+                async def hardware_wait():
+                    await asyncio.sleep(4) # Simulate ROS2 action completing
+                    # 3. Read physical file back in
+                    plan_json = "No plan found."
+                    try:
+                        with open("/tmp/cognibot_task_plan.json", "r") as f:
+                            plan_json = json.dumps(json.load(f), indent=2)
+                    except Exception:
+                        pass
+                        
+                    wakeup_prompt = (
+                        f"SYSTEM WAKEUP. Hardware node '{y.target_node}' completed.\n"
+                        f"Active Task Plan:\n{plan_json}\n\n"
+                        f"You successfully completed milestone {y.milestone_idx}.\n"
+                        f"Your self-instruction was: '{y.next_action}'\n"
+                        f"Proceed with your next milestone."
+                    )
+                    self.add_message("system", "[Hardware Supervisor] ✅ Node completed. Waking up Agentic loop.")
+                    await self.run_agent(wakeup_prompt)
+                
+                asyncio.create_task(hardware_wait())
+            else:
+                self.add_message("system", f"Mission Control: Yield state '{y.state}'. Awaiting manual continuation.")
                 
         except Exception as e:
             self.add_message("system", f"Error: {str(e)}")

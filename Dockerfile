@@ -1,16 +1,17 @@
-FROM osrf/ros:humble-desktop-full
+FROM osrf/ros:jazzy-desktop-full
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 2. Install Remote PC ROS 2 Dependencies and CycloneDDS
 RUN apt-get update && apt-get install -y \
-    ros-humble-rmw-cyclonedds-cpp \
-    ros-humble-turtlebot3 \
-    ros-humble-turtlebot3-msgs \
-    ros-humble-navigation2 \
-    ros-humble-nav2-bringup \
-    ros-humble-slam-toolbox \
-    ros-humble-rviz2 \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-turtlebot3 \
+    ros-jazzy-turtlebot3-msgs \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
+    ros-jazzy-slam-toolbox \
+    ros-jazzy-rviz2 \
+    ros-jazzy-ros-gz ros-jazzy-gz-sim-vendor \
     python3-colcon-common-extensions \
     git \
     tmux \
@@ -19,7 +20,13 @@ RUN apt-get update && apt-get install -y \
     ruby-dev \
     build-essential \
     wget \
-    "~nros-humble-rqt*" \
+    curl lsb-release gnupg \
+    "~nros-jazzy-rqt*" 
+
+RUN curl https://packages.osrfoundation.org/gazebo.gpg --output /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/gazebo-stable.list > /dev/null \
+    && apt-get update \
+    && apt-get install gz-harmonic -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Match Robot Environment Variables EXACTLY
@@ -29,7 +36,7 @@ ENV TURTLEBOT3_MODEL=burger
 ENV CYCLONEDDS_URI=file:///root/turtlebot3_ws/src/cyclonedds.xml
 
 # 4. Source ROS 2 automatically
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
 RUN echo 'source ~/turtlebot3_ws/install/setup.bash' >> ~/.bashrc
 
 # 5. Directory setup
