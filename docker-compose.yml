@@ -1,26 +1,10 @@
-
-# docker-compose.physical.yml
-# ─────────────────────────────────────────────────────────────────────
-# Orchestrator-only stack targeting the PHYSICAL TurtleBot3.
-# Prerequisites:
-#   - Physical TurtleBot3 running ROS2 Humble on DDS domain 184
-#   - rosbridge_server running either on the robot or in the rosbridge
-#     service below (set ROSBRIDGE_HOST in the orchestrator env if external)
-#
-# Usage:
-#   docker compose -f docker-compose.physical.yml up
-#
-# To switch to local DDS (no rosbridge), change agenticros.json:
-#   { "transport": { "mode": "local" }, "local": { "domainId": 184 } }
-# ─────────────────────────────────────────────────────────────────────
-
 services:
-  # ─── CogniBot Orchestrator ─────────────────────────────────────────
+  # ─── CogniBot Orchestrator (ROS2 Jazzy) ───────────────────────────
   orchestrator:
     build:
       context: .
-      dockerfile: Dockerfile.orchestrator
-    image: cognibot/orchestrator:humble
+      dockerfile: Dockerfile.orchestrator.jazzy
+    image: cognibot/orchestrator:jazzy
     container_name: cognibot_orchestrator
     network_mode: host
     environment:
@@ -30,29 +14,19 @@ services:
       - COGNIBOT_CONFIG_PATH=/app/config/cognibot.env
       - AGENTICROS_CONFIG_PATH=/app/config/agenticros.json
       - DISPLAY=${DISPLAY}
-      - QT_X11_NO_MITSHM=1
-      - XDG_RUNTIME_DIR=/tmp/runtime-root
     volumes:
-      - ./cognibot:/app/cognibot        # live-reload Python source
-      - ./skills:/app/skills            # live-reload skills/SOUL.md
-      - ./config:/app/config            # live-reload agenticros.json, cognibot.env
-      - cognibot_memory:/app/memory_db  # persistent LanceDB vector store
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    depends_on:
-      rosbridge:
-        condition: service_started
+      - ./cognibot:/app/cognibot
+      - ./skills:/app/skills
+      - ./config:/app/config
     stdin_open: true
     tty: true
 
-  # ─── rosbridge sidecar ─────────────────────────────────────────────
-  # Only needed when using transport.mode = "rosbridge".
-  # Comment out this service (and the depends_on above) when using
-  # transport.mode = "local" with rclnodejs direct DDS.
+  # ─── Jazzy Rosbridge Gateway ──────────────────────────────────────
   rosbridge:
     build:
       context: .
-      dockerfile: Dockerfile.remote
-    image: agenticros/ros2:latest
+      dockerfile: Dockerfile.remote.jazzy
+    image: cognibot/rosbridge:jazzy
     container_name: cognibot_rosbridge
     network_mode: host
     ipc: host
@@ -61,15 +35,13 @@ services:
     tty: true
     environment:
       - ROS_DOMAIN_ID=184
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - CYCLONEDDS_URI=file:///root/turtlebot3_ws/src/cyclonedds.xml
+      - TURTLEBOT3_MODEL=burger
       - DISPLAY=${DISPLAY}
-      - XAUTHORITY=${XAUTHORITY:-~/.Xauthority}
+      - XAUTHORITY=${XAUTHORITY:-/home/ubuntu/.Xauthority}
       - QT_X11_NO_MITSHM=1
     volumes:
-      - .:/root/turtlebot3_ws/src/
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${XAUTHORITY:-~/.Xauthority}:${XAUTHORITY:-~/.Xauthority}:rw
+      - ${XAUTHORITY:-/home/ubuntu/.Xauthority}:${XAUTHORITY:-/home/ubuntu/.Xauthority}:rw
 
   # ─── Node Manager (DeepStream CV Nodes) ────────────────────────────
   node_manager:

@@ -1,0 +1,106 @@
+
+# docker-compose.physical.yml
+# ─────────────────────────────────────────────────────────────────────
+# Orchestrator-only stack targeting the PHYSICAL TurtleBot3.
+# Prerequisites:
+#   - Physical TurtleBot3 running ROS2 Humble on DDS domain 184
+#   - rosbridge_server running either on the robot or in the rosbridge
+#     service below (set ROSBRIDGE_HOST in the orchestrator env if external)
+#
+# Usage:
+#   docker compose -f docker-compose.physical.yml up
+#
+# To switch to local DDS (no rosbridge), change agenticros.json:
+#   { "transport": { "mode": "local" }, "local": { "domainId": 184 } }
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  # ─── CogniBot Orchestrator ─────────────────────────────────────────
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    image: cognibot/orchestrator:humble
+    container_name: cognibot_orchestrator
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=184
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
+      - COGNIBOT_CONFIG_PATH=/app/config/cognibot.env
+      - AGENTICROS_CONFIG_PATH=/app/config/agenticros.json
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - XDG_RUNTIME_DIR=/tmp/runtime-root
+    volumes:
+      - ./cognibot:/app/cognibot        # live-reload Python source
+      - ./skills:/app/skills            # live-reload skills/SOUL.md
+      - ./config:/app/config            # live-reload agenticros.json, cognibot.env
+      - cognibot_memory:/app/memory_db  # persistent LanceDB vector store
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    depends_on:
+      rosbridge:
+        condition: service_started
+    stdin_open: true
+    tty: true
+
+  # ─── rosbridge sidecar ─────────────────────────────────────────────
+  # Only needed when using transport.mode = "rosbridge".
+  # Comment out this service (and the depends_on above) when using
+  # transport.mode = "local" with rclnodejs direct DDS.
+  rosbridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.remote
+    image: agenticros/ros2:latest
+    container_name: cognibot_rosbridge
+    network_mode: host
+    ipc: host
+    pid: host
+    stdin_open: true
+    tty: true
+    environment:
+      - ROS_DOMAIN_ID=184
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///root/turtlebot3_ws/src/cyclonedds.xml
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=${XAUTHORITY:-~/.Xauthority}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - .:/root/turtlebot3_ws/src/
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-~/.Xauthority}:${XAUTHORITY:-~/.Xauthority}:rw
+
+  # ─── Node Manager (DeepStream CV Nodes) ────────────────────────────
+  node_manager:
+    image: deepstream_ros2humble:v7.1-yolo
+    container_name: cognibot_node_manager
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=184
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
+      - PIPELINES_DIR=/app/pipelines
+      - DISPLAY=${DISPLAY:-:0}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - ./config:/app/config:ro
+      - ../cortexai/deepstream/pipelines:/app/pipelines
+      - ../cortexai/deepstream/models:/app/pipelines/config/models
+      - ./cognibot/node_manager.py:/app/node_manager.py:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video, compute, utility]
+    stdin_open: true
+    tty: true
+    # command: ["python3", "/app/node_manager.py"]
+
+# ─── Named Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  cognibot_memory:
+    driver: local   # persists LanceDB tables across orchestrator container restarts

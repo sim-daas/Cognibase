@@ -507,6 +507,12 @@ export async function handleToolCall(
       }
       const type = args["type"] as string;
       const message = args["message"] as Record<string, unknown>;
+
+      // Explicitly advertise before publish for Jazzy rosbridge compatibility
+      if (transport.advertise) {
+        transport.advertise({ topic, type });
+      }
+
       const PUBLISH_TIMEOUT_MS = 10_000;
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("Publish timed out after " + PUBLISH_TIMEOUT_MS / 1000 + "s. Check rosbridge_server is running and reachable.")), PUBLISH_TIMEOUT_MS);
@@ -702,28 +708,58 @@ export async function handleToolCall(
 
     case "ros2_cmd_vel_duration": {
       const rawTopicIn = String(args["topic"] ?? "/cmd_vel").trim();
-      const topic = toNamespacedTopic(config, rawTopicIn);
+      
+      // 1. Sync with ros2_publish logic for robot prefix rewriting
+      const cmdVelMatch = rawTopicIn.match(/^\/([^/]+)\/cmd_vel$/i);
+      const segment = cmdVelMatch?.[1] ?? "";
+      const topic =
+        cmdVelMatch && !segment.toLowerCase().startsWith("robot")
+          ? `/robot${segment.replace(/-/g, "")}/cmd_vel`
+          : toNamespacedTopic(config, rawTopicIn);
+
+      // 2. Detect topic type (Twist vs TwistStamped)
+      let type = "geometry_msgs/msg/Twist";
+      try {
+        const activeTopics = await transport.listTopics();
+        const found = activeTopics.find(t => t.name === topic);
+        if (found && found.type.includes("TwistStamped")) {
+          type = found.type;
+        }
+      } catch (e) {
+        if (process.stderr?.write) process.stderr.write(`[AgenticROS] Topic type detection failed: ${e}\n`);
+      }
+
       const linear_x = Number(args["linear_x"] ?? 0);
       const linear_y = Number(args["linear_y"] ?? 0);
       const angular_z = Number(args["angular_z"] ?? 0);
       const duration = Number(args["duration"] ?? 1);
 
-      const message = {
+      const twistMsg = {
         linear: { x: linear_x, y: linear_y, z: 0.0 },
         angular: { x: 0.0, y: 0.0, z: angular_z }
       };
 
+      const isStamped = type.includes("TwistStamped");
+      const message = isStamped 
+        ? { header: { stamp: { sec: 0, nanosec: 0 }, frame_id: "" }, twist: twistMsg }
+        : twistMsg;
+
       const safe = checkPublishSafety(config, {
         topic,
-        type: "geometry_msgs/msg/Twist",
-        message
+        type,
+        message: isStamped ? (message as any).twist : message
       });
       if (safe.block) {
         return { content: [{ type: "text", text: safe.blockReason ?? "Blocked by safety." }], isError: true };
       }
 
       if (process.stderr?.write) {
-        process.stderr.write(`[AgenticROS] ros2_cmd_vel_duration: topic=${topic} v=(${linear_x},${linear_y}) w=${angular_z} t=${duration}s\n`);
+        process.stderr.write(`[AgenticROS] ros2_cmd_vel_duration: topic=${topic} type=${type} v=(${linear_x},${linear_y}) w=${angular_z} t=${duration}s\n`);
+      }
+
+      // 3. Explicitly advertise before publish for Jazzy rosbridge compatibility
+      if (transport.advertise) {
+        transport.advertise({ topic, type });
       }
 
       await new Promise<void>((resolve) => {
@@ -733,11 +769,11 @@ export async function handleToolCall(
             clearInterval(interval);
             // End with zero velocity
             try {
-              await transport.publish({
-                topic,
-                type: "geometry_msgs/msg/Twist",
-                msg: { linear: { x: 0, y: 0, z: 0 }, angular: { x: 0, y: 0, z: 0 } }
-              });
+              const stopTwist = { linear: { x: 0, y: 0, z: 0 }, angular: { x: 0, y: 0, z: 0 } };
+              const stopMsg = isStamped 
+                ? { header: { stamp: { sec: 0, nanosec: 0 }, frame_id: "" }, twist: stopTwist }
+                : stopTwist;
+              await transport.publish({ topic, type, msg: stopMsg });
             } catch (e) {
               if (process.stderr?.write) process.stderr.write(`[AgenticROS] cmd_vel_duration stop-publish failed: ${e}\n`);
             }
@@ -745,14 +781,22 @@ export async function handleToolCall(
             return;
           }
           try {
-            await transport.publish({ topic, type: "geometry_msgs/msg/Twist", msg: message });
+            // Update timestamp if stamped
+            if (isStamped) {
+              const now = Date.now();
+              (message as any).header.stamp = {
+                sec: Math.floor(now / 1000),
+                nanosec: (now % 1000) * 1000000
+              };
+            }
+            await transport.publish({ topic, type, msg: message });
           } catch (e) {
             if (process.stderr?.write) process.stderr.write(`[AgenticROS] cmd_vel_duration publish failed: ${e}\n`);
           }
         }, 100);
       });
 
-      return { content: [{ type: "text", text: `Successfully published velocity to ${topic} for ${duration} seconds.` }] };
+      return { content: [{ type: "text", text: `Successfully published ${isStamped ? 'TwistStamped' : 'Twist'} velocity to ${topic} for ${duration} seconds.` }] };
     }
 
     case "ros2_query_state": {

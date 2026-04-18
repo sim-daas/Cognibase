@@ -7,9 +7,6 @@
         <Discovery>
             <ParticipantIndex>auto</ParticipantIndex>
             <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
-            <Peers>
-                <Peer address="192.168.0.25"/>
-            </Peers>
         </Discovery>
     </Domain>
 </CycloneDDS>

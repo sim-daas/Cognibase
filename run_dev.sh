@@ -1,9 +1,9 @@
 #!/bin/bash
 
-IMAGE="${1:-cognibase:jazzy}"
+IMAGE="${1:-cognibase:jazzyv2}"
 CONTAINER_NAME="${2:-cognisim}"
-HOST_REPO_PATH="${3:-$(pwd)}"
-CONTAINER_REPO_PATH="/root/turtlebot3_ws/src/"
+HOST_REPO_PATH="${3:-/home/ubuntu/githubrepos/Cognibase/turtlebot3_simulations}"
+CONTAINER_REPO_PATH="/root/turtlebot3_ws/src/turtlebot3_simulations"
 
 # Build the image if it doesn't exist
 if [[ "$(docker images -q ${IMAGE} 2> /dev/null)" == "" ]]; then

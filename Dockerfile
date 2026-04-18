@@ -40,8 +40,14 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
 RUN echo 'source ~/turtlebot3_ws/install/setup.bash' >> ~/.bashrc
 
 # 5. Directory setup
-RUN mkdir -p ~/turtlebot3_ws/src \
-    cd ~/turtlebot3_ws/src/
+RUN mkdir -p ~/turtlebot3_ws/src
+WORKDIR /root/turtlebot3_ws/src
+RUN git clone -b jazzy https://github.com/ROBOTIS-GIT/turtlebot3_msgs.git && \
+    git clone -b jazzy https://github.com/ROBOTIS-GIT/DynamixelSDK.git && \
+    git clone -b jazzy https://github.com/ROBOTIS-GIT/turtlebot3.git
 
-WORKDIR /root/turtlebot3_ws
+COPY cyclonedds.xml /root/turtlebot3_ws/src/cyclonedds.xml
+# RUN . /opt/ros/jazzy/setup.sh && cd ~/turtlebot3_ws && \
+#     colcon build --symlink-install
+
 CMD ["/bin/bash"]
