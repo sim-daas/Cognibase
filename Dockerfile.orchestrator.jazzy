@@ -1,0 +1,64 @@
+# ─── CogniBot Orchestrator Jazzy Container ───────────────────────────
+# ROS2 Jazzy + Python 3.12 + Node.js 20 + AgenticROS MCP Adapter
+# ──────────────────────────────────────────────────────────────────────
+
+FROM osrf/ros:jazzy-desktop-full
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── 1. System deps + CycloneDDS ──────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    python3-pip \
+    python3-venv \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── 2. Install Node.js 20 (for MCP adapter) ─────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@9.15.4 --activate
+
+# ── 3. Setup Robot Workspace (Jazzy Repos) ──────────────────────────
+RUN mkdir -p /root/turtlebot3_ws/src
+WORKDIR /root/turtlebot3_ws/src
+RUN git clone -b jazzy https://github.com/ROBOTIS-GIT/turtlebot3_msgs.git && \
+    git clone -b jazzy https://github.com/ROBOTIS-GIT/DynamixelSDK.git && \
+    git clone -b jazzy https://github.com/ROBOTIS-GIT/turtlebot3.git
+
+WORKDIR /root/turtlebot3_ws
+RUN . /opt/ros/jazzy/setup.sh && colcon build --symlink-install
+
+# ── 4. Build AgenticROS MCP adapter ─────────────────────────────────
+WORKDIR /app/agenticros
+COPY agenticros/package.json agenticros/pnpm-workspace.yaml agenticros/.npmrc agenticros/tsconfig.base.json agenticros/pnpm-lock.yaml ./
+COPY agenticros/packages/core/package.json packages/core/
+COPY agenticros/packages/agenticros-claude-code/package.json packages/agenticros-claude-code/
+RUN pnpm install --no-frozen-lockfile
+COPY agenticros/packages/core/ packages/core/
+COPY agenticros/packages/agenticros-claude-code/ packages/agenticros-claude-code/
+RUN pnpm --filter @agenticros/core build && pnpm --filter @agenticros/claude-code build
+
+# ── 5. Python dependencies (using venv to avoid system conflicts) ─────
+WORKDIR /app
+COPY requirements.txt .
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# ── 6. ROS2 environment ──────────────────────────────────────────────
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=184
+ENV PATH="/opt/venv/bin:$PATH"
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
+RUN echo "source /root/turtlebot3_ws/install/setup.bash" >> /root/.bashrc
+RUN echo 'export TERM=xterm-256color' >> ~/.bashrc
+
+RUN apt update && apt install -y x11-apps xdg-utils feh
+
+# 7. Default to bash
+CMD ["/bin/bash"]

@@ -1,0 +1,56 @@
+FROM osrf/ros:jazzy-desktop-full
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Install Jazzy Dependencies
+RUN apt-get update && apt-get install -y \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
+    ros-jazzy-slam-toolbox \
+    ros-jazzy-rviz2 \
+    ros-jazzy-rosbridge-suite \
+    ros-jazzy-ros-gz \
+    ros-jazzy-gz-sim-vendor \
+    python3-colcon-common-extensions \
+    git \
+    tmux \
+    nano \
+    ruby \
+    ruby-dev \
+    build-essential \
+    wget \
+    "~nros-jazzy-rqt*" \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Match Environment Variables
+ENV ROS_DOMAIN_ID=184
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV TURTLEBOT3_MODEL=burger
+ENV CYCLONEDDS_URI=file:///root/turtlebot3_ws/src/cyclonedds.xml
+
+# 3. Setup Workspace and Clone Jazzy Repos
+RUN mkdir -p /root/turtlebot3_ws/src
+WORKDIR /root/turtlebot3_ws/src
+
+# Clone Jazzy branches for msgs/SDK/robot as requested
+# (Simulation repo excluded as it will be handled separately)
+RUN git clone -b jazzy https://github.com/ROBOTIS-GIT/turtlebot3_msgs.git && \
+    git clone -b jazzy https://github.com/ROBOTIS-GIT/DynamixelSDK.git && \
+    git clone -b jazzy https://github.com/ROBOTIS-GIT/turtlebot3.git
+
+# 4. Build the workspace
+WORKDIR /root/turtlebot3_ws
+RUN . /opt/ros/jazzy/setup.sh && colcon build --symlink-install
+
+# 5. Source ROS 2 automatically
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
+RUN echo 'source /root/turtlebot3_ws/install/setup.bash' >> ~/.bashrc
+
+# 6. Entrypoint (matches user's latest jazzy script)
+COPY agenticros/docker/ros2_entrypoint_jazzy.sh /ros2_entrypoint.sh
+COPY cyclonedds.xml /root/turtlebot3_ws/src/cyclonedds.xml
+RUN chmod +x /ros2_entrypoint.sh
+
+ENTRYPOINT ["/ros2_entrypoint.sh"]
+CMD ["ros2", "launch", "rosbridge_server", "rosbridge_websocket_launch.xml"]

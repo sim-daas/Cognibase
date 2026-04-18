@@ -304,6 +304,7 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
             "required_nodes": required_nodes
         }
         ctx.deps.heavy_tool_count = 0  # Reset counter once plan is active
+        tui_widget = ctx.deps.start_tool_ui("create_task_plan", {"goal": goal})
         
         # Write to physical file for Mission Control access
         plan_path = "/tmp/cognibot_task_plan.json"
@@ -317,7 +318,9 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
         for i, m in enumerate(milestones, 1):
             ctx.deps.console.print(Align.right(f"   [dim]{i}. {m}[/dim]"))
             
-        return f"Task Plan '{goal}' successfully registered and saved. Proceed with your first milestone."
+        res = f"Task Plan '{goal}' successfully registered and saved. Proceed with your first milestone."
+        ctx.deps.end_tool_ui(tui_widget, res, success=True)
+        return res
 
     @agent.tool
     async def yield_status(
@@ -339,6 +342,8 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
             target_node: If WAITING_ON_NODE, the ROS2 node name you are waiting on.
         """
         ctx.deps.console.print(Align.right(f"⏸️  [bold yellow]Yielding to Mission Control...[/bold yellow]"))
+        tui_widget = ctx.deps.start_tool_ui("yield_status", {"state": state, "milestone": current_milestone_index})
+        ctx.deps.end_tool_ui(tui_widget, f"Yielding with state {state}", success=True)
         raise YieldInterrupt(state, current_milestone_index, next_action, target_node)
 
     # ── 5. Semantic Memory tools ──────────────────────────────────────

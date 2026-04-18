@@ -17,7 +17,8 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Footer, Header, Input, Static, Select
+from textual.widgets import Footer, Header, Input, Static, Select, TabbedContent, TabPane
+import os
 
 from pydantic_ai import Agent
 from cognibot.agent import AgentDeps, YieldInterrupt
@@ -109,6 +110,24 @@ class CogniBotTUI(App):
     layout: vertical;
 }
 
+TabbedContent {
+    height: auto;
+}
+
+#plan-container {
+    height: auto;
+    max-height: 15;
+}
+
+.plan-goal {
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.plan-step {
+    padding-left: 1;
+}
+
 #think-select {
     margin: 1 0;
     height: auto;
@@ -190,6 +209,7 @@ VerticalScroll > .vertical-scrollbar {
         self.deps = deps
         self.history: List[Any] = []
         self.msg_count = 0
+        self.current_milestone = 1
         # Inject TUI hooks into deps
         self.deps.tui_on_tool_start = self.on_tool_start
         self.deps.tui_on_tool_end = self.on_tool_end
@@ -202,20 +222,44 @@ VerticalScroll > .vertical-scrollbar {
                 with Vertical(id="input-container"):
                     yield Input(placeholder="Type your command here...", id="chat-input")
             with Vertical(id="sidebar"):
-                yield Static("ACTIVE CONTEXT", classes="sidebar-title")
-                yield Static(f"Model: [dim]{self.deps.config.llm_model}[/dim]")
-                yield Select(
-                    [("Low", "low"), ("Medium", "medium"), ("High", "high")],
-                    value="medium",
-                    id="think-select",
-                    prompt="Thinking Mode"
-                )
+                with TabbedContent():
+                    with TabPane("Plan", id="tab-plan"):
+                        yield VerticalScroll(id="plan-container")
+                    with TabPane("Model", id="tab-model"):
+                        yield Static("ACTIVE CONTEXT", classes="sidebar-title")
+                        yield Static(f"Model: [dim]{self.deps.config.llm_model}[/dim]")
+                        yield Select(
+                            [("Low", "low"), ("Medium", "medium"), ("High", "high")],
+                            value="medium",
+                            id="think-select",
+                            prompt="Thinking Mode"
+                        )
                 yield Static("\nMODIFIED TOOLS", classes="sidebar-title")
                 yield VerticalScroll(id="tool-calls-list")
 
+    def update_plan_ui(self):
+        container = self.query_one("#plan-container")
+        container.remove_children()
+        plan_path = "/tmp/cognibot_task_plan.json"
+        if os.path.exists(plan_path):
+            try:
+                with open(plan_path, "r") as f:
+                    plan = json.load(f)
+                goal = plan.get("goal", "Unknown Goal")
+                milestones = plan.get("milestones", [])
+                container.mount(Static(f"[bold]{goal}[/bold]", classes="plan-goal"))
+                for i, m in enumerate(milestones, 1):
+                    style = "[bold green]▶ " if i == self.current_milestone else "[dim]  "
+                    end_style = "[/bold green]" if i == self.current_milestone else "[/dim]"
+                    container.mount(Static(f"{style}{i}. {m}{end_style}", classes="plan-step"))
+            except Exception:
+                container.mount(Static("[dim]Error reading plan.[/dim]"))
+        else:
+            container.mount(Static("[dim]No active plan.[/dim]"))
 
     def on_mount(self) -> None:
         self.query_one("#chat-input").focus()
+        self.update_plan_ui()
 
     @on(Input.Submitted)
     def handle_input(self, event: Input.Submitted) -> None:
@@ -284,36 +328,52 @@ VerticalScroll > .vertical-scrollbar {
         except YieldInterrupt as y:
             # 1. Clear LLM Context (Amnesia)
             self.history.clear()
+            self.current_milestone = y.milestone_idx
+            self.update_plan_ui()
             response_widget.content = f"🛑 Yield Triggered: {y.state}"
             response_widget.refresh()
+            self.notify("LLM Context Cleared", title="Mission Control", severity="warning")
             self.add_message("system", f"Mission Control: LLM context cleared. Target node: {y.target_node}")
             
             # 2. Simulate Mission Control Hardware Loop
+            def get_wakeup_prompt(completed_item: str):
+                plan_json = "No plan found."
+                try:
+                    with open("/tmp/cognibot_task_plan.json", "r") as f:
+                        plan_json = json.dumps(json.load(f), indent=2)
+                except Exception:
+                    pass
+                return (
+                    f"SYSTEM WAKEUP. {completed_item} completed.\n"
+                    f"Active Task Plan:\n{plan_json}\n\n"
+                    f"You successfully completed milestone {y.milestone_idx}.\n"
+                    f"Your self-instruction was: '{y.next_action}'\n"
+                    f"Proceed with your next milestone."
+                )
+
             if y.state == "WAITING_ON_NODE":
                 self.add_message("system", f"[Hardware Supervisor] 🛰️ Waiting on ROS2 node: {y.target_node}...")
                 
                 # Background wait logic
                 async def hardware_wait():
                     await asyncio.sleep(4) # Simulate ROS2 action completing
-                    # 3. Read physical file back in
-                    plan_json = "No plan found."
-                    try:
-                        with open("/tmp/cognibot_task_plan.json", "r") as f:
-                            plan_json = json.dumps(json.load(f), indent=2)
-                    except Exception:
-                        pass
-                        
-                    wakeup_prompt = (
-                        f"SYSTEM WAKEUP. Hardware node '{y.target_node}' completed.\n"
-                        f"Active Task Plan:\n{plan_json}\n\n"
-                        f"You successfully completed milestone {y.milestone_idx}.\n"
-                        f"Your self-instruction was: '{y.next_action}'\n"
-                        f"Proceed with your next milestone."
-                    )
+                    self.current_milestone = y.milestone_idx + 1
+                    self.update_plan_ui()
+                    self.notify("Hardware Node Completed. Executing next step.", title="Mission Control", severity="information")
                     self.add_message("system", "[Hardware Supervisor] ✅ Node completed. Waking up Agentic loop.")
-                    await self.run_agent(wakeup_prompt)
+                    await self.run_agent(get_wakeup_prompt(f"Hardware node '{y.target_node}'"))
                 
                 asyncio.create_task(hardware_wait())
+            elif y.state in ("MILESTONE_COMPLETE", "BLOCKED"):
+                self.add_message("system", f"[Mission Control] 🔄 Context Flushed. Auto-resuming next milestone...")
+                
+                async def auto_resume():
+                    self.current_milestone = y.milestone_idx + 1
+                    self.update_plan_ui()
+                    self.notify(f"Yield state '{y.state}'. Executing next step.", title="Mission Control", severity="information")
+                    await self.run_agent(get_wakeup_prompt(f"Yield state '{y.state}'"))
+                    
+                asyncio.create_task(auto_resume())
             else:
                 self.add_message("system", f"Mission Control: Yield state '{y.state}'. Awaiting manual continuation.")
                 
@@ -331,5 +391,18 @@ VerticalScroll > .vertical-scrollbar {
 
     def on_tool_end(self, widget: ToolCallWidget, result: str, success: bool):
         widget.update_result(result, success)
+        if widget.tool_name == "create_task_plan":
+            self.current_milestone = 1
+            self.update_plan_ui()
+            self.notify("New task plan created.", title="Plan Created", severity="information")
+            try:
+                # Switch to Plan tab
+                tabs = self.query_one(TabbedContent)
+                tabs.active = "tab-plan"
+            except Exception:
+                pass
+        elif widget.tool_name == "yield_status":
+            self.update_plan_ui()
+
         if "IMAGE:" in result:
             self.notify("Camera snapshot captured. Click link in sidebar to view.", title="Image Captured", severity="information")

@@ -1,11 +1,10 @@
 services:
-  # ─── CogniBot Orchestrator (ROS2 Humble) ───────────────────────────
-  # PydanticAI agent + MCP adapter (Node.js subprocess)
+  # ─── CogniBot Orchestrator (ROS2 Jazzy) ───────────────────────────
   orchestrator:
     build:
       context: .
-      dockerfile: Dockerfile.orchestrator
-    image: cognibot/orchestrator:humble
+      dockerfile: Dockerfile.orchestrator.jazzy
+    image: cognibot/orchestrator:jazzy
     container_name: cognibot_orchestrator
     network_mode: host
     environment:
@@ -14,24 +13,21 @@ services:
       - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
       - COGNIBOT_CONFIG_PATH=/app/config/cognibot.env
       - AGENTICROS_CONFIG_PATH=/app/config/agenticros.json
+      - DISPLAY=${DISPLAY}
     volumes:
       - ./cognibot:/app/cognibot
       - ./skills:/app/skills
       - ./config:/app/config
-    depends_on:
-      simulation:
-        condition: service_started
     stdin_open: true
     tty: true
 
-  # ─── TurtleBot3 Simulation (ROS2 Jazzy) ────────────────────────────
-  # Gazebo (gz-sim), Nav2, rosbridge_server on :9090
-  simulation:
+  # ─── Jazzy Rosbridge Gateway ──────────────────────────────────────
+  rosbridge:
     build:
       context: .
-      dockerfile: Dockerfile.remote
-    image: agenticros/ros2:latest
-    container_name: cognibot_simulation
+      dockerfile: Dockerfile.remote.jazzy
+    image: cognibot/rosbridge:jazzy
+    container_name: cognibot_rosbridge
     network_mode: host
     ipc: host
     pid: host
@@ -44,13 +40,39 @@ services:
       - XAUTHORITY=${XAUTHORITY:-/home/ubuntu/.Xauthority}
       - QT_X11_NO_MITSHM=1
     volumes:
-      - .:/root/turtlebot3_ws/src/
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-/home/ubuntu/.Xauthority}:${XAUTHORITY:-/home/ubuntu/.Xauthority}:rw
+
+  # ─── Node Manager (DeepStream CV Nodes) ────────────────────────────
+  node_manager:
+    image: deepstream_ros2humble:v7.1-yolo
+    container_name: cognibot_node_manager
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=184
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///app/config/cyclonedds.xml
+      - PIPELINES_DIR=/app/pipelines
+      - DISPLAY=${DISPLAY:-:0}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - ./config:/app/config:ro
+      - ../cortexai/deepstream/pipelines:/app/pipelines
+      - ../cortexai/deepstream/models:/app/pipelines/config/models
+      - ./cognibot/node_manager.py:/app/node_manager.py:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu]
+              capabilities: [gpu, video, compute, utility]
+    stdin_open: true
+    tty: true
+    # command: ["python3", "/app/node_manager.py"]
+
+# ─── Named Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  cognibot_memory:
+    driver: local   # persists LanceDB tables across orchestrator container restarts
