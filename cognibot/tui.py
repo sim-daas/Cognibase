@@ -5,6 +5,7 @@ Features a responsive sidebar for tool calls and a clean, sharp-cornered chat st
 
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -18,11 +19,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Header, Input, Static, Select, TabbedContent, TabPane
-import os
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 from cognibot.agent import AgentDeps, YieldInterrupt
-import os
 
 
 class MessageWidget(Static):
@@ -290,6 +290,27 @@ VerticalScroll > .vertical-scrollbar {
         widget.scroll_visible()
         return widget
 
+    def get_wakeup_prompt(self, completed_item: str, milestone_idx: int, session_context: dict, next_action: str) -> str:
+        plan_path = "/tmp/cognibot_task_plan.json"
+        goal = "Unknown"
+        try:
+            if os.path.exists(plan_path):
+                with open(plan_path, "r") as f:
+                    plan = json.load(f)
+                    goal = plan.get("goal", "Unknown")
+        except:
+            pass
+            
+        session_ctx_str = json.dumps(session_context, indent=2)
+        return (
+            f"SYSTEM WAKEUP. {completed_item} completed.\n"
+            f"Active Task Plan Goal: {goal}\n"
+            f"Current Milestone Index: {milestone_idx}\n"
+            f"SESSION CONTEXT (Persisted Variables): {session_ctx_str}\n\n"
+            f"Your last self-instruction was: '{next_action}'\n"
+            f"Proceed with your next milestone."
+        )
+
     @work(exclusive=True)
     async def run_agent(self, user_input: str) -> None:
         chat_area = self.query_one("#chat-area")
@@ -315,7 +336,6 @@ VerticalScroll > .vertical-scrollbar {
             )
 
             # 2. Extract the final text content
-            # PydanticAI automatically gathers all TextParts into result.data
             final_text = result.output
 
             # 3. Update the UI with the final answer
@@ -324,6 +344,23 @@ VerticalScroll > .vertical-scrollbar {
 
             # 4. Save the history (Standard PydanticAI practice)
             self.history.extend(result.new_messages())
+
+            # 5. Clean Context to prevent stale info
+            TRANSIENT_TOOLS = {
+                "ros2_list_topics", "ros2_list_services", "ros2_list_actions",
+                "ros2_list_nodes", "ros2_query_state", "ros2_camera_snapshot",
+                "ros2_param_get", "ros2_subscribe_once"
+            }
+            for msg in self.history:
+                if isinstance(msg, ModelRequest):
+                    for part in msg.parts:
+                        if isinstance(part, ToolReturnPart) and part.tool_name in TRANSIENT_TOOLS:
+                            part.content = f"[{part.tool_name} output cleared to prevent stale state. Use the tool again for current info.]"
+                elif isinstance(msg, ModelResponse):
+                    for part in msg.parts:
+                        if isinstance(part, ToolCallPart) and part.tool_name in TRANSIENT_TOOLS:
+                            part.args = "[Arguments cleared]"
+
 
         except YieldInterrupt as y:
             # 1. Clear LLM Context (Amnesia)
@@ -335,33 +372,39 @@ VerticalScroll > .vertical-scrollbar {
             self.notify("LLM Context Cleared", title="Mission Control", severity="warning")
             self.add_message("system", f"Mission Control: LLM context cleared. Target node: {y.target_node}")
             
-            # 2. Simulate Mission Control Hardware Loop
-            def get_wakeup_prompt(completed_item: str):
-                plan_json = "No plan found."
-                try:
-                    with open("/tmp/cognibot_task_plan.json", "r") as f:
-                        plan_json = json.dumps(json.load(f), indent=2)
-                except Exception:
-                    pass
-                return (
-                    f"SYSTEM WAKEUP. {completed_item} completed.\n"
-                    f"Active Task Plan:\n{plan_json}\n\n"
-                    f"You successfully completed milestone {y.milestone_idx}.\n"
-                    f"Your self-instruction was: '{y.next_action}'\n"
-                    f"Proceed with your next milestone."
-                )
+            # 2. Update physical plan on disk with the latest state and session_context
+            plan_path = "/tmp/cognibot_task_plan.json"
+            current_plan = {}
+            try:
+                if os.path.exists(plan_path):
+                    with open(plan_path, "r") as f:
+                        current_plan = json.load(f)
+                
+                # Merge new session_context if provided
+                if y.session_context:
+                    if "session_context" not in current_plan:
+                        current_plan["session_context"] = {}
+                    current_plan["session_context"].update(y.session_context)
+                
+                # Update current milestone index
+                current_plan["current_milestone_index"] = y.milestone_idx
+                
+                with open(plan_path, "w") as f:
+                    json.dump(current_plan, f, indent=2)
+            except Exception as e:
+                self.add_message("system", f"Error updating task plan: {str(e)}")
 
+            final_session_ctx = current_plan.get("session_context", {})
+
+            # 3. Simulate Mission Control Hardware Loop
             if y.state == "WAITING_ON_NODE":
                 self.add_message("system", f"[Hardware Supervisor] 🛰️ Waiting on ROS2 node: {y.target_node}...")
                 
-                # Background wait logic
                 async def hardware_wait():
                     await asyncio.sleep(4) # Simulate ROS2 action completing
-                    self.current_milestone = y.milestone_idx + 1
-                    self.update_plan_ui()
-                    self.notify("Hardware Node Completed. Executing next step.", title="Mission Control", severity="information")
                     self.add_message("system", "[Hardware Supervisor] ✅ Node completed. Waking up Agentic loop.")
-                    await self.run_agent(get_wakeup_prompt(f"Hardware node '{y.target_node}'"))
+                    wakeup_prompt = self.get_wakeup_prompt(f"Hardware node '{y.target_node}'", y.milestone_idx, final_session_ctx, y.next_action)
+                    await self.run_agent(wakeup_prompt)
                 
                 asyncio.create_task(hardware_wait())
             elif y.state in ("MILESTONE_COMPLETE", "BLOCKED"):
@@ -371,7 +414,8 @@ VerticalScroll > .vertical-scrollbar {
                     self.current_milestone = y.milestone_idx + 1
                     self.update_plan_ui()
                     self.notify(f"Yield state '{y.state}'. Executing next step.", title="Mission Control", severity="information")
-                    await self.run_agent(get_wakeup_prompt(f"Yield state '{y.state}'"))
+                    wakeup_prompt = self.get_wakeup_prompt(f"Yield state '{y.state}'", y.milestone_idx, final_session_ctx, y.next_action)
+                    await self.run_agent(wakeup_prompt)
                     
                 asyncio.create_task(auto_resume())
             else:

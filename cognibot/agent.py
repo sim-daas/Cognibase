@@ -25,11 +25,12 @@ from cognibot.skill_loader import compile_system_prompt, load_skill_content
 
 class YieldInterrupt(Exception):
     """Raised when the LLM wants to yield context and execution to Mission Control."""
-    def __init__(self, state: str, milestone_idx: int, next_action: str, target_node: str | None):
+    def __init__(self, state: str, milestone_idx: int, next_action: str, target_node: str | None, session_context: dict[str, Any] | None = None):
         self.state = state
         self.milestone_idx = milestone_idx
         self.next_action = next_action
         self.target_node = target_node
+        self.session_context = session_context or {}
         super().__init__(f"Yielding to Mission Control: {state}")
 
 logger = logging.getLogger(__name__)
@@ -301,7 +302,8 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
         ctx.deps.active_task_plan = {
             "goal": goal,
             "milestones": milestones,
-            "required_nodes": required_nodes
+            "required_nodes": required_nodes,
+            "session_context": {}
         }
         ctx.deps.heavy_tool_count = 0  # Reset counter once plan is active
         tui_widget = ctx.deps.start_tool_ui("create_task_plan", {"goal": goal})
@@ -328,7 +330,8 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
         state: str,
         current_milestone_index: int,
         next_action: str,
-        target_node: str | None = None
+        target_node: str | None = None,
+        session_context: dict[str, Any] | None = None
     ) -> str:
         """Call this to pause your cognitive loop, clear context, or wait on hardware.
         
@@ -340,11 +343,13 @@ def create_agent(config: CogniBotConfig, mcp_bridge: MCPBridge) -> Agent[AgentDe
             current_milestone_index: Where you are in the JSON task plan array (1-indexed).
             next_action: A brief instruction to YOURSELF for when Mission Control wakes you back up.
             target_node: If WAITING_ON_NODE, the ROS2 node name you are waiting on.
+            session_context: Optional dictionary to store state across yields (e.g. {"iteration": 2}). 
+                This survives context wipes and will be re-injected on wakeup.
         """
         ctx.deps.console.print(Align.right(f"⏸️  [bold yellow]Yielding to Mission Control...[/bold yellow]"))
         tui_widget = ctx.deps.start_tool_ui("yield_status", {"state": state, "milestone": current_milestone_index})
         ctx.deps.end_tool_ui(tui_widget, f"Yielding with state {state}", success=True)
-        raise YieldInterrupt(state, current_milestone_index, next_action, target_node)
+        raise YieldInterrupt(state, current_milestone_index, next_action, target_node, session_context)
 
     # ── 5. Semantic Memory tools ──────────────────────────────────────
     _domains_str = ", ".join(DOMAINS.keys())
